@@ -1,8 +1,13 @@
 universe = vanilla
 
+initial_dir = $(results_dir)
+log = ../../$(log_dir)/$(Process).log
+output = ../../$(log_dir)/$(Process).out
+error = ../../$(log_dir)/$(Process).err
+
 request_cpus = 1
-request_memory = $(mem)GB
-request_disk = $(disk)GB
+request_memory = 20GB
+request_disk = 40GB
 
 # Extra GPU settings
 request_gpus            = 1
@@ -16,7 +21,7 @@ Requirements            = (Target.CUDADriverVersion >= 12.1) && (Target.GPUs_Glo
 
 should_transfer_files = YES
 when_to_transfer_output = ON_EXIT
-requirements = (Target.HasCHTCStaging == true) && (Target.CUDADriverVersion >= 12.1) && (Target.GPUs_GlobalMemoryMb > $(gpu_mem))
+requirements = (Target.HasCHTCStaging == true) && (Target.CUDADriverVersion >= 12.1) && (Target.GPUs_GlobalMemoryMb > 110592)
 
 +InteractiveJob = true
 

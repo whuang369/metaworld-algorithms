@@ -742,6 +742,57 @@ class OnPolicyAlgorithm(
             seed,
         )
 
+    @staticmethod
+    def exponentiated_gradient_ascent_step(w, returns, returns_ref, learning_rate=1.0,
+                                           eps=0.1):
+        # Use s_t - s_{t-1} instead of s_ref - s_t
+        diff = np.clip(returns_ref - returns, 0, np.inf)
+
+        w_new = w * np.exp(learning_rate * diff)
+
+        # Normalize to ensure weights sum to 1
+        w_new = w_new / w_new.sum()
+
+        # Smoothing to prevent weights form getting too close to 0
+        w_uniform = 1 / len(w_new) * np.ones(len(w_new))
+        w_new = (1 - eps) * w_new + eps * w_uniform
+
+        return w_new
+    
+    @staticmethod
+    def set_task_distributions(
+        envs: GymVectorEnv,
+        distributions: list[npt.NDArray[np.float64]],
+    ) -> None:
+        """Set the task probability distribution for all environments in the vector environment.
+        
+        Args:
+            envs: The vector environment containing multiple wrapped environments
+            distributions: List of probability distributions, one per environment in the vector env.
+                          Each distribution is an array of probabilities for tasks in that environment.
+        """
+        from metaworld.metaworld.wrappers import RandomTaskSelectWrapper
+        
+        assert len(distributions) == envs.num_envs, (
+            f"Number of distributions {len(distributions)} does not match "
+            f"number of environments {envs.num_envs}"
+        )
+        
+        # Access individual environments in the vector env
+        for env_idx, dist in enumerate(distributions):
+            env = envs.envs[env_idx]  # type: ignore
+            # Navigate through wrappers to find RandomTaskSelectWrapper
+            current = env
+            while current is not None:
+                if isinstance(current, RandomTaskSelectWrapper):
+                    current.set_task_distribution(dist)
+                    break
+                # Move to next wrapper
+                if hasattr(current, 'env'):
+                    current = current.env
+                else:
+                    break
+
     @override
     def train(
         self,
@@ -770,6 +821,12 @@ class OnPolicyAlgorithm(
         rollout_buffer = self.spawn_rollout_buffer(env_config, config, seed)
 
         start_time = time.time()
+        
+        # Track update count for DRO updates
+        update_count = 0
+        
+        # Get dro_upd_num_steps from algorithm if available
+        dro_upd_num_steps = getattr(self, 'dro_upd_num_steps', None)
 
         for global_step in range(start_step, config.total_steps // envs.num_envs):
             total_steps = global_step * envs.num_envs
@@ -837,9 +894,68 @@ class OnPolicyAlgorithm(
                     ),
                 )
                 rollout_buffer.reset()
+                update_count += 1
 
                 if track:
                     log(logs, step=total_steps)
+
+                # DRO update: collect success rates after dro_upd_num_steps
+                if (
+                    dro_upd_num_steps is not None
+                    and update_count > 0
+                    and update_count % dro_upd_num_steps == 0
+                ):
+                    from metaworld.metaworld.wrappers import RandomTaskSelectWrapper
+                    
+                    # Collect current mean_success_rate for all tasks
+                    mean_success_rate, mean_returns, mean_success_per_task = (
+                        env_config.evaluate(envs, self)
+                    )
+                    
+                    # Log the current success rates
+                    dro_logs = {
+                        "dro/mean_success_rate": float(mean_success_rate),
+                        "dro/mean_returns": float(mean_returns),
+                    } | {
+                        f"dro/{task_name}_success_rate": float(success_rate)
+                        for task_name, success_rate in mean_success_per_task.items()
+                    }
+                    
+                    # Log current task distributions
+                    dist_logs = {}
+                    curr_succ_rate = [
+                        float(success_rate)
+                        for task_name, success_rate in mean_success_per_task.items()
+                        ]
+                    curr_dist = []
+                    for env_idx in range(envs.num_envs):
+                        env = envs.envs[env_idx]  # type: ignore
+                        current = env
+                        while current is not None:
+                            if isinstance(current, RandomTaskSelectWrapper):
+                                if current.task_distribution is not None:
+                                    for task_idx, prob in enumerate(current.task_distribution):
+                                        dist_logs[f"dro/env_{env_idx}_task_{task_idx}_prob"] = float(prob)
+                                    curr_dist = current.task_distribution
+                                break
+                            if hasattr(current, 'env'):
+                                current = current.env
+                            else:
+                                break
+
+                    if curr_dist is not None:
+
+                        curr_dist = np.array(curr_dist)
+                        curr_succ_rate = np.array(curr_succ_rate)
+
+                        returns_ref = np.ones(len(curr_succ_rate))
+                        new_dist = self.exponentiated_gradient_ascent_step(curr_dist, curr_succ_rate, returns_ref, learning_rate=0.1,
+                                           eps=0.1)
+
+
+                    
+                    if track:
+                        log(dro_logs | dist_logs, step=total_steps)
 
                 # Evaluation
                 if (

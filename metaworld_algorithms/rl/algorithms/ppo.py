@@ -123,6 +123,7 @@ class PPOConfig(AlgorithmConfig):
     num_gradient_steps: int = 32
     num_epochs: int = 16
     target_kl: float | None = None
+    dro_upd_num_steps: int | None = None
 
 
 class PPO(OnPolicyAlgorithm[PPOConfig]):
@@ -141,6 +142,7 @@ class PPO(OnPolicyAlgorithm[PPOConfig]):
     num_gradient_steps: int = struct.field(pytree_node=False)
     num_epochs: int = struct.field(pytree_node=False)
     target_kl: float | None = struct.field(pytree_node=False)
+    dro_upd_num_steps: int | None = struct.field(pytree_node=False)
 
     @override
     @staticmethod
@@ -195,6 +197,7 @@ class PPO(OnPolicyAlgorithm[PPOConfig]):
             num_gradient_steps=config.num_gradient_steps,
             num_epochs=config.num_epochs,
             target_kl=config.target_kl,
+            dro_upd_num_steps=config.dro_upd_num_steps,
         )
 
     @override
