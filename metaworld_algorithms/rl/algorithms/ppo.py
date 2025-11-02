@@ -341,7 +341,7 @@ class PPO(OnPolicyAlgorithm[PPOConfig]):
             }
 
         (_, logs), vf_grads = jax.value_and_grad(value_function_loss, has_aux=True)(
-            self.value_function.params, data
+            self.value_function.params
         )
         vf_grads_flat, _ = jax.flatten_util.ravel_pytree(vf_grads)
         grads_hist_dict = prefix_dict(

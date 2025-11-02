@@ -9,7 +9,4 @@ condor_submit job.sub \
   results_dir=${results_dir} \
   log_dir=${log_dir} \
   commands_file=${commands_file} \
-  mem=${2} \
-  disk=${3} \
-  gpu_mem=${4} \
-  job_length=${5}
+  job_length=${2}
