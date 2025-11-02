@@ -5,8 +5,8 @@ description = "Implementations of Multi-Task and Meta-Learning baselines for the
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "gymnasium>=1.0.0",
     "metaworld",
+    "gymnasium>=1.0.0",
     "distrax>=0.1.5",
     "flax>=0.9.0",
     "jaxtyping>=0.2.34",
@@ -40,7 +40,7 @@ conflicts = [
 ]
 
 [tool.uv.sources]
-metaworld = { git = "https://github.com/reginald-mclean/Metaworld.git", rev = "same-step-autoreset" }
+metaworld = { path = "./metaworld" }
 
 [tool.ruff]
 ignore = ["F722"]
