@@ -3,6 +3,7 @@ import time
 from collections import deque
 from typing import Deque, Generic, Self, TypeVar, override
 
+import gymnasium as gym
 import numpy as np
 import numpy.typing as npt
 import orbax.checkpoint as ocp
@@ -764,6 +765,7 @@ class OnPolicyAlgorithm(
         envs: GymVectorEnv,
         distributions: list[npt.NDArray[np.float64]],
     ) -> None:
+        from metaworld.metaworld.wrappers import DROWrapper
         """Set the task probability distribution for all environments in the vector environment.
         
         Args:
@@ -771,27 +773,30 @@ class OnPolicyAlgorithm(
             distributions: List of probability distributions, one per environment in the vector env.
                           Each distribution is an array of probabilities for tasks in that environment.
         """
-        from metaworld.metaworld.wrappers import RandomTaskSelectWrapper
-        
-        assert len(distributions) == envs.num_envs, (
-            f"Number of distributions {len(distributions)} does not match "
-            f"number of environments {envs.num_envs}"
-        )
-        
-        # Access individual environments in the vector env
-        for env_idx, dist in enumerate(distributions):
-            env = envs.envs[env_idx]  # type: ignore
-            # Navigate through wrappers to find RandomTaskSelectWrapper
-            current = env
-            while current is not None:
-                if isinstance(current, RandomTaskSelectWrapper):
-                    current.set_task_distribution(dist)
-                    break
-                # Move to next wrapper
-                if hasattr(current, 'env'):
-                    current = current.env
-                else:
-                    break
+        from metaworld.wrappers import DROWrapper
+
+        if isinstance(envs, gym.vector.SyncVectorEnv):
+            # SyncVectorEnv has envs attribute
+            for env_idx, dist in enumerate(distributions):
+                env = envs.envs[env_idx]
+                # Navigate through wrappers to find DROWrapper
+                current = env
+                while current is not None:
+                    if isinstance(current, DROWrapper):
+                        current.set_task_distribution(dist)
+                        break
+                    # Move to next wrapper
+                    if hasattr(current, 'env'):
+                        current = current.env
+                    else:
+                        break
+        else:
+            # AsyncVectorEnv - use call method to set task distribution
+            # Since AsyncVectorEnv doesn't expose envs attribute, we use call() method
+            # The call() method will find set_task_distribution on DROWrapper in the wrapper chain
+            for env_idx in range(envs.num_envs):
+                # call() finds methods in the wrapper chain, so it should work with DROWrapper
+                envs.call([env_idx], 'set_task_distribution', distributions)
 
     @override
     def train(
@@ -905,7 +910,7 @@ class OnPolicyAlgorithm(
                     and update_count > 0
                     and update_count % dro_upd_num_steps == 0
                 ):
-                    from metaworld.metaworld.wrappers import RandomTaskSelectWrapper
+                    from metaworld.wrappers import DROWrapper
                     
                     # Collect current mean_success_rate for all tasks
                     mean_success_rate, mean_returns, mean_success_per_task = (
@@ -920,6 +925,10 @@ class OnPolicyAlgorithm(
                         f"dro/{task_name}_success_rate": float(success_rate)
                         for task_name, success_rate in mean_success_per_task.items()
                     }
+
+                    task_names = [ task_name
+                        for task_name, success_rate in mean_success_per_task.items()
+                    ]
                     
                     # Log current task distributions
                     dist_logs = {}
@@ -927,31 +936,50 @@ class OnPolicyAlgorithm(
                         float(success_rate)
                         for task_name, success_rate in mean_success_per_task.items()
                         ]
-                    curr_dist = []
-                    for env_idx in range(envs.num_envs):
-                        env = envs.envs[env_idx]  # type: ignore
+                    curr_dist = None
+                    if isinstance(envs, gym.vector.SyncVectorEnv):
+                        # SyncVectorEnv has envs attribute - can access directly
+                        env = envs.envs[0]
                         current = env
                         while current is not None:
-                            if isinstance(current, RandomTaskSelectWrapper):
+                            if isinstance(current, DROWrapper):
                                 if current.task_distribution is not None:
                                     for task_idx, prob in enumerate(current.task_distribution):
-                                        dist_logs[f"dro/env_{env_idx}_task_{task_idx}_prob"] = float(prob)
+                                        dist_logs[f"dro/task_{task_names[task_idx]}_prob"] = float(prob)
                                     curr_dist = current.task_distribution
                                 break
                             if hasattr(current, 'env'):
                                 current = current.env
                             else:
                                 break
+                    elif isinstance(envs, gym.vector.AsyncVectorEnv):
+                        # AsyncVectorEnv - use get_attr to get task_distribution
+                        # We can't navigate wrappers, so we'll try to get task_distribution directly
+                        try:
+                            tasks = envs.get_attr('tasks')
+                            for task_i in tasks:
+                                print ("This ENV:")
+                                for task in task_i:
+                                    print(f"Task Name: {task.env_name}")
+
+                            task_distributions = envs.get_attr('task_distribution')
+                            if task_distributions and task_distributions[0] is not None:
+                                # Use the first environment's distribution as they should be the same
+                                curr_dist = task_distributions[0]
+                                for task_idx, prob in enumerate(curr_dist):
+                                    dist_logs[f"dro/task_{task_names[task_idx]}_prob"] = float(prob)
+                        except Exception:
+                            # If get_attr fails, we can't access the distribution
+                            pass
 
                     if curr_dist is not None:
-
                         curr_dist = np.array(curr_dist)
                         curr_succ_rate = np.array(curr_succ_rate)
 
                         returns_ref = np.ones(len(curr_succ_rate))
                         new_dist = self.exponentiated_gradient_ascent_step(curr_dist, curr_succ_rate, returns_ref, learning_rate=0.1,
                                            eps=0.1)
-
+                        self.set_task_distributions(envs, new_dist)
 
                     
                     if track:

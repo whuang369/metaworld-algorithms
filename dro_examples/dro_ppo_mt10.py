@@ -35,6 +35,7 @@ def main() -> None:
         env=MetaworldConfig(
             env_id="MT10",
             terminate_on_success=False,
+            dro=True,
         ),
         algorithm=PPOConfig(
             num_tasks=10,
@@ -53,7 +54,7 @@ def main() -> None:
             target_kl=None,
             clip_vf_loss=False,
             normalize_advantages=False,
-            dro_upd_num_steps=20,
+            dro_upd_num_steps=1,
         ),
         training_config=OnPolicyTrainingConfig(
             total_steps=int(2e7),

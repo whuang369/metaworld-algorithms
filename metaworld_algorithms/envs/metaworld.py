@@ -1,4 +1,5 @@
 # pyright: reportAttributeAccessIssue=false, reportIncompatibleMethodOverride=false, reportOptionalMemberAccess=false
+from curses import wrapper
 from dataclasses import dataclass
 from functools import cached_property
 from typing import override
@@ -10,6 +11,7 @@ from metaworld_algorithms.types import Agent, MetaLearningAgent, GymVectorEnv
 
 from metaworld_algorithms.config.envs import EnvConfig, MetaLearningEnvConfig
 from metaworld.evaluation import evaluation, metalearning_evaluation
+from metaworld.wrappers import DROWrapper
 
 
 @dataclass(frozen=True)
@@ -19,6 +21,7 @@ class MetaworldConfig(EnvConfig):
     reward_normalization_method: str | None = None
     normalize_observations: bool = False
     env_name: str | None = None
+    dro: bool = False
 
     @cached_property
     @override
@@ -117,6 +120,7 @@ class MetaworldConfig(EnvConfig):
             num_goals=self.num_goals,
             reward_normalization_method=self.reward_normalization_method,
             normalize_observations=self.normalize_observations,
+            dro=self.dro,
         )
 
 
