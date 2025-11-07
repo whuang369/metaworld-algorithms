@@ -33,9 +33,8 @@ def main() -> None:
         seed=args.seed,
         data_dir=args.data_dir,
         env=MetaworldConfig(
-            env_id="MT10",
+            env_id="DRO-MT10",
             terminate_on_success=False,
-            dro=True,
         ),
         algorithm=PPOConfig(
             num_tasks=10,

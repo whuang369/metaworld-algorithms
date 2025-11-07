@@ -120,7 +120,6 @@ class MetaworldConfig(EnvConfig):
             num_goals=self.num_goals,
             reward_normalization_method=self.reward_normalization_method,
             normalize_observations=self.normalize_observations,
-            dro=self.dro,
         )
 
 
