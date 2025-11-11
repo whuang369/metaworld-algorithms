@@ -84,11 +84,11 @@ class MetaworldConfig(EnvConfig):
 
         if self.use_one_hot:
             num_tasks = 1
-            if self.env_id == "MT10":
+            if self.env_id in ("MT10", "DRO-MT10"):
                 num_tasks = 10
-            if self.env_id == "MT25":
+            elif self.env_id == "MT25":
                 num_tasks = 25
-            if self.env_id == "MT50":
+            elif self.env_id == "MT50":
                 num_tasks = 50
             one_hot_ub = np.ones(num_tasks)
             one_hot_lb = np.zeros(num_tasks)

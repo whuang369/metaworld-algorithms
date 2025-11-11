@@ -5,7 +5,7 @@ import tyro
 
 from metaworld_algorithms.config.networks import (
     ContinuousActionPolicyConfig,
-    # ValueFunctionConfig,
+    ValueFunctionConfig,
 )
 from metaworld_algorithms.config.nn import VanillaNetworkConfig
 from metaworld_algorithms.config.optim import OptimizerConfig
@@ -23,51 +23,45 @@ class Args:
     wandb_entity: str | None = None
     data_dir: Path = Path("./run_results")
     resume: bool = False
-    wandb_group: str | None = None
 
 
 def main() -> None:
     args = tyro.cli(Args)
 
+    num_tasks = 50
+
     run = Run(
-        run_name="mt10_ppo_lfb",
+        run_name="dro_mt50_ppo",
         seed=args.seed,
         data_dir=args.data_dir,
-        env=MetaworldConfig(
-            env_id="DRO-MT10",
-            terminate_on_success=False,
-        ),
-        eval_env=MetaworldConfig(
-            env_id="MT10",
-            terminate_on_success=False,
-        ),
+        env=MetaworldConfig(env_id="DRO-MT50"),
+        eval_env=MetaworldConfig(env_id="MT50"),
         algorithm=PPOConfig(
-            num_tasks=10,
+            num_tasks=num_tasks,
             gamma=0.99,
             policy_config=ContinuousActionPolicyConfig(
                 network_config=VanillaNetworkConfig(
                     optimizer=OptimizerConfig(max_grad_norm=1.0),
-                ),
-                squash_tanh=False,
+                )
             ),
-            vf_config=None,
-            baseline_type="linear",
+            vf_config=ValueFunctionConfig(
+                network_config=VanillaNetworkConfig(
+                    optimizer=OptimizerConfig(max_grad_norm=1.0),
+                )
+            ),
             num_epochs=16,
             num_gradient_steps=32,
             gae_lambda=0.97,
             target_kl=None,
             clip_vf_loss=False,
-            normalize_advantages=False,
-            dro_upd_num_steps=1,
         ),
         training_config=OnPolicyTrainingConfig(
-            total_steps=int(2e7),
+            total_steps=int(1e8),
             rollout_steps=10_000,
-            evaluation_frequency=1_000_000 // 2500,
+            evaluation_frequency=int(1_000_000 // 500),
         ),
         checkpoint=True,
         resume=args.resume,
-        dro=True,
     )
 
     if args.track:
@@ -77,7 +71,6 @@ def main() -> None:
             entity=args.wandb_entity,
             config=run,
             resume="allow",
-            group=args.wandb_group,
         )
 
     run.start()

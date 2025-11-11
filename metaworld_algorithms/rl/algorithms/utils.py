@@ -401,3 +401,60 @@ def explained_variance(
     assert y_true.ndim == 1 and y_pred.ndim == 1
     var_y = np.var(y_true)
     return np.nan if var_y == 0 else float(1 - np.var(y_true - y_pred) / var_y)
+
+
+def get_task_names_from_vector_env(envs) -> list[str]:
+    """Get task names from all environments in a vector environment."""
+    from metaworld.env_dict import ALL_V3_ENVIRONMENTS
+
+    # Try to get task names using get_attr for AsyncVectorEnv (works with MultiTaskDROWrapper)
+    if hasattr(envs, 'get_attr'):
+        try:
+            # Get current_task_name attribute from MultiTaskDROWrapper if it exists
+            current_task_names = envs.get_attr('current_task_name')
+            # get_attr returns a list, so we can use it directly
+            return [name if name else "unknown" for name in current_task_names]
+        except Exception as e:
+            # If get_attr fails, try fallback methods
+            pass
+
+    # Fallback: if we can access envs directly (SyncVectorEnv)
+    if hasattr(envs, 'envs'):
+        task_names = []
+        for env in envs.envs:
+            # Check if it has current_task_name attribute (MultiTaskDROWrapper)
+            current = env
+            task_name = None
+
+            # Look for current_task_name attribute
+            while current is not None:
+                if hasattr(current, 'current_task_name'):
+                    task_name = current.current_task_name
+                    break
+                if hasattr(current, 'unwrapped'):
+                    current = current.unwrapped
+                elif hasattr(current, 'env'):
+                    current = current.env
+                else:
+                    break
+
+            if task_name:
+                task_names.append(task_name)
+            else:
+                # Fallback: get from unwrapped environment
+                current = env
+                while hasattr(current, 'env') or hasattr(current, 'unwrapped'):
+                    if hasattr(current, 'unwrapped'):
+                        current = current.unwrapped
+                    elif hasattr(current, 'env'):
+                        current = current.env
+                    else:
+                        break
+                task_class_name = getattr(current, 'task_name', type(current).__name__)
+                metaworld_cls_to_task_name = {v.__name__: k for k, v in ALL_V3_ENVIRONMENTS.items()}
+                task_names.append(metaworld_cls_to_task_name.get(task_class_name, "unknown"))
+
+        return task_names
+    else:
+        # For AsyncVectorEnv without direct access, return unknown for all
+        return ["unknown"] * envs.num_envs

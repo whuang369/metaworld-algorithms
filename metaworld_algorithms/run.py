@@ -51,6 +51,10 @@ class Run:
     best_checkpoint_metric: str = "mean_success_rate"
     resume: bool = False
 
+    eval_env: EnvConfig = None
+
+    dro: bool = False
+
     def __post_init__(self) -> None:
         self._wandb_enabled = False
         self._wandb_run_id: str | None = None
@@ -106,6 +110,10 @@ class Run:
             )
 
         envs = self.env.spawn(seed=self.seed)
+        if self.eval_env is not None:
+            eval_envs = self.eval_env.spawn(seed=self.seed)
+        else:
+            eval_envs = None
 
         algorithm_cls = get_algorithm_for_config(self.algorithm)
         algorithm: Algorithm
@@ -186,6 +194,8 @@ class Run:
             checkpoint_manager=checkpoint_manager,
             checkpoint_metadata=checkpoint_metadata,
             buffer_checkpoint=buffer_checkpoint,
+            eval_env=eval_envs,
+            dro=self.dro
         )
 
         # Cleanup

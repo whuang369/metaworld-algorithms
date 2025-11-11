@@ -80,6 +80,8 @@ class Algorithm(
         checkpoint_manager: ocp.CheckpointManager | None = None,
         checkpoint_metadata: CheckpointMetadata | None = None,
         buffer_checkpoint: ReplayBufferCheckpoint | None = None,
+        eval_env: GymVectorEnv = None,
+        dro: bool = False,
     ) -> Self: ...
 
 
@@ -116,6 +118,8 @@ class MetaLearningAlgorithm(
         checkpoint_manager: ocp.CheckpointManager | None = None,
         checkpoint_metadata: CheckpointMetadata | None = None,
         buffer_checkpoint: ReplayBufferCheckpoint | None = None,
+        eval_env: GymVectorEnv = None,
+        dro: bool = False,
     ) -> Self: ...
 
 
@@ -163,6 +167,8 @@ class GradientBasedMetaLearningAlgorithm(
         checkpoint_manager: ocp.CheckpointManager | None = None,
         checkpoint_metadata: CheckpointMetadata | None = None,
         buffer_checkpoint: ReplayBufferCheckpoint | None = None,
+        eval_env: GymVectorEnv = None,
+        dro: bool = False,
     ) -> Self:
         global_episodic_return: Deque[float] = deque([], maxlen=20 * self.num_tasks)
         global_episodic_length: Deque[int] = deque([], maxlen=20 * self.num_tasks)
@@ -373,6 +379,8 @@ class RNNBasedMetaLearningAlgorithm(
         checkpoint_manager: ocp.CheckpointManager | None = None,
         checkpoint_metadata: CheckpointMetadata | None = None,
         buffer_checkpoint: ReplayBufferCheckpoint | None = None,
+        eval_env: GymVectorEnv = None,
+        dro: bool = False,
     ) -> Self:
         global_episodic_return: Deque[float] = deque([], maxlen=20 * self.num_tasks)
         global_episodic_length: Deque[int] = deque([], maxlen=20 * self.num_tasks)
@@ -568,6 +576,8 @@ class OffPolicyAlgorithm(
         checkpoint_manager: ocp.CheckpointManager | None = None,
         checkpoint_metadata: CheckpointMetadata | None = None,
         buffer_checkpoint: ReplayBufferCheckpoint | None = None,
+        eval_env: GymVectorEnv = None,
+        dro: bool = False,
     ) -> Self:
         global_episodic_return: Deque[float] = deque([], maxlen=20 * self.num_tasks)
         global_episodic_length: Deque[int] = deque([], maxlen=20 * self.num_tasks)
@@ -793,10 +803,7 @@ class OnPolicyAlgorithm(
             # AsyncVectorEnv - use call method to set task distribution
             # Since AsyncVectorEnv doesn't expose envs attribute, we use call() method
             # The call() method will find set_task_distribution on DROWrapper or MultiTaskDROWrapper in the wrapper chain
-            for env_idx in range(envs.num_envs):
-                # call() finds methods in the wrapper chain, so it should work with DROWrapper or MultiTaskDROWrapper
-                # call() signature: call(indices, method_name, *args)
-                envs.call([env_idx], 'set_task_distribution', distributions[env_idx])
+            envs.call('set_task_distribution', distributions)
 
     @override
     def train(
@@ -810,11 +817,41 @@ class OnPolicyAlgorithm(
         checkpoint_manager: ocp.CheckpointManager | None = None,
         checkpoint_metadata: CheckpointMetadata | None = None,
         buffer_checkpoint: ReplayBufferCheckpoint | None = None,
+        eval_env: GymVectorEnv = None,
+        dro: bool = False,
     ) -> Self:
         global_episodic_return: Deque[float] = deque([], maxlen=20 * self.num_tasks)
         global_episodic_length: Deque[int] = deque([], maxlen=20 * self.num_tasks)
 
         obs, _ = envs.reset()
+
+        if dro:
+            tasks = envs.get_attr('tasks')
+
+            from metaworld.env_dict import ALL_V3_ENVIRONMENTS
+
+            def _get_task_names(
+                    envs: gym.vector.SyncVectorEnv | gym.vector.AsyncVectorEnv,
+            ) -> list[str]:
+                metaworld_cls_to_task_name = {v.__name__: k for k, v in ALL_V3_ENVIRONMENTS.items()}
+                return [
+                    metaworld_cls_to_task_name[task_name]
+                    for task_name in envs.get_attr("task_name")
+                ]
+
+            task_names = _get_task_names(eval_env)
+
+            print(f"TASK NAMES: {task_names}")
+
+            task_step_counts = {task_name: 0 for task_name in task_names}
+
+            dist = []
+            for task_i in tasks:
+                # print("This ENV:")
+                # for task in task_i:
+                #     print(f"Task Name: {task.env_name}")
+                dist.append(np.ones(len(task_names)) / len(task_names))
+            self.set_task_distributions(envs, dist)
 
         episode_started = np.ones((envs.num_envs,))
         start_step, episodes_ended = 0, 0
@@ -850,6 +887,17 @@ class OnPolicyAlgorithm(
                 std=aux_policy_outs.get("std"),
             )
 
+            if dro:
+
+                from metaworld_algorithms.rl.algorithms.utils import get_task_names_from_vector_env
+
+                current_task_names = get_task_names_from_vector_env(envs)
+
+                # Count active tasks (each environment contributes 1 step to its active task)
+                for task_name in current_task_names:
+                    if task_name in task_step_counts:
+                        task_step_counts[task_name] += 1
+
             episode_started = np.logical_or(terminations, truncations)
             obs = next_obs
 
@@ -867,6 +915,42 @@ class OnPolicyAlgorithm(
                 print(
                     f"global_step={total_steps}, mean_episodic_return={np.mean(list(global_episodic_return))}"
                 )
+
+                if dro and total_steps % 1_000 == 0:
+
+                    for i, sub_obs in enumerate(obs):
+                        prt_obs = list(sub_obs)
+                        prt_obs = prt_obs[-10:-1]
+                        prt_obs = np.array(prt_obs, dtype=int)
+                        print(f"One-hot Embedding for Env {i}: {prt_obs}; Task Name for Env {i}: {current_task_names[i]}")
+
+                    print("\n" + "=" * 60)
+                    print("Task Activity Statistics:")
+                    print("=" * 60)
+                    total_steps_tracked = sum(task_step_counts.values())
+
+                    # Sort by step count (descending)
+                    mt10_tasks = task_step_counts.items()
+
+                    task_perc = {}
+
+                    print(f"{'Task Name':<30} {'Steps':>10} {'Percentage':>12}")
+                    print("-" * 60)
+                    for task_name, step_count in mt10_tasks:
+                        percentage = (step_count / total_steps_tracked * 100) if total_steps_tracked > 0 else 0
+                        print(f"{task_name:<30} {step_count:>10} {percentage:>11.2f}%")
+                        task_perc[task_name] = percentage
+
+                    print("=" * 60)
+
+                    if track:
+                        log({
+                            f"dro/{task_name}_average_sampling_percentage": percentage
+                            for task_name, percentage in task_perc.items()
+                        }, step = total_steps)
+
+                    # task_step_counts = {task_name: 0 for task_name in MT10_TASK_NAMES}
+
                 if track:
                     log(
                         {
@@ -904,87 +988,6 @@ class OnPolicyAlgorithm(
                 if track:
                     log(logs, step=total_steps)
 
-                # DRO update: collect success rates after dro_upd_num_steps
-                if (
-                    dro_upd_num_steps is not None
-                    and update_count > 0
-                    and update_count % dro_upd_num_steps == 0
-                ):
-                    from metaworld.wrappers import DROWrapper
-                    
-                    # Collect current mean_success_rate for all tasks
-                    mean_success_rate, mean_returns, mean_success_per_task = (
-                        env_config.evaluate(envs, self)
-                    )
-                    #
-                    # # Log the current success rates
-                    # dro_logs = {
-                    #     "dro/mean_success_rate": float(mean_success_rate),
-                    #     "dro/mean_returns": float(mean_returns),
-                    # } | {
-                    #     f"dro/{task_name}_success_rate": float(success_rate)
-                    #     for task_name, success_rate in mean_success_per_task.items()
-                    # }
-                    #
-                    # task_names = [ task_name
-                    #     for task_name, success_rate in mean_success_per_task.items()
-                    # ]
-
-                    # Log current task distributions
-                    dist_logs = {}
-                    # curr_succ_rate = [
-                    #     float(success_rate)
-                    #     for task_name, success_rate in mean_success_per_task.items()
-                    #     ]
-                    # curr_dist = None
-                    # if isinstance(envs, gym.vector.SyncVectorEnv):
-                    #     # SyncVectorEnv has envs attribute - can access directly
-                    #     env = envs.envs[0]
-                    #     current = env
-                    #     while current is not None:
-                    #         if isinstance(current, DROWrapper):
-                    #             if current.task_distribution is not None:
-                    #                 for task_idx, prob in enumerate(current.task_distribution):
-                    #                     dist_logs[f"dro/task_{task_names[task_idx]}_prob"] = float(prob)
-                    #                 curr_dist = current.task_distribution
-                    #             break
-                    #         if hasattr(current, 'env'):
-                    #             current = current.env
-                    #         else:
-                    #             break
-                    # elif isinstance(envs, gym.vector.AsyncVectorEnv):
-                    #     # AsyncVectorEnv - use get_attr to get task_distribution
-                    #     # We can't navigate wrappers, so we'll try to get task_distribution directly
-                    #     try:
-                    #         tasks = envs.get_attr('tasks')
-                    #         for task_i in tasks:
-                    #             print ("This ENV:")
-                    #             for task in task_i:
-                    #                 print(f"Task Name: {task.env_name}")
-                    #
-                    #         task_distributions = envs.get_attr('task_distribution')
-                    #         if task_distributions and task_distributions[0] is not None:
-                    #             # Use the first environment's distribution as they should be the same
-                    #             curr_dist = task_distributions[0]
-                    #             for task_idx, prob in enumerate(curr_dist):
-                    #                 dist_logs[f"dro/task_{task_names[task_idx]}_prob"] = float(prob)
-                    #     except Exception:
-                    #         # If get_attr fails, we can't access the distribution
-                    #         pass
-                    #
-                    # if curr_dist is not None:
-                    #     curr_dist = np.array(curr_dist)
-                    #     curr_succ_rate = np.array(curr_succ_rate)
-                    #
-                    #     returns_ref = np.ones(len(curr_succ_rate))
-                    #     new_dist = self.exponentiated_gradient_ascent_step(curr_dist, curr_succ_rate, returns_ref, learning_rate=0.1,
-                    #                        eps=0.1)
-                    #     self.set_task_distributions(envs, new_dist)
-
-                    
-                    # if track:
-                    #     log(dro_logs | dist_logs, step=total_steps)
-
                 # Evaluation
                 if (
                     config.evaluation_frequency > 0
@@ -992,48 +995,113 @@ class OnPolicyAlgorithm(
                     and episode_started.any()
                     and global_step > 0
                 ):
-                    mean_success_rate, mean_returns, mean_success_per_task = (
-                        env_config.evaluate(envs, self)
-                    )
-                    eval_metrics = {
-                        "charts/mean_success_rate": float(mean_success_rate),
-                        "charts/mean_evaluation_return": float(mean_returns),
-                    } | {
-                        f"charts/{task_name}_success_rate": float(success_rate)
-                        for task_name, success_rate in mean_success_per_task.items()
-                    }
-                    print(
-                        f"total_steps={total_steps}, mean evaluation success rate: {mean_success_rate:.4f}"
-                        + f" return: {mean_returns:.4f}"
-                    )
-
-                    if track:
-                        log(eval_metrics, step=total_steps)
-
-                    # Checkpointing
-                    if checkpoint_manager is not None:
-                        if not episode_started.all():
-                            raise NotImplementedError(
-                                "Checkpointing currently doesn't work for the case where evaluation is run before all envs have finished their episodes / are about to be reset."
-                            )
-
-                        checkpoint_manager.save(
-                            total_steps,
-                            args=get_checkpoint_save_args(
-                                self,
-                                envs,
-                                global_step,
-                                episodes_ended,
-                                run_timestamp,
-                            ),
-                            metrics={
-                                k.removeprefix("charts/"): v
-                                for k, v in eval_metrics.items()
-                            },
+                    if eval_env is None or dro==False:
+                        mean_success_rate, mean_returns, mean_success_per_task = (
+                            env_config.evaluate(envs, self)
+                        )
+                        eval_metrics = {
+                                           "charts/mean_success_rate": float(mean_success_rate),
+                                           "charts/mean_evaluation_return": float(mean_returns),
+                                       } | {
+                                           f"charts/{task_name}_success_rate": float(success_rate)
+                                           for task_name, success_rate in mean_success_per_task.items()
+                                       }
+                        print(
+                            f"total_steps={total_steps}, mean evaluation success rate: {mean_success_rate:.4f}"
+                            + f" return: {mean_returns:.4f}"
                         )
 
-                    # Reset envs again to exit eval mode
-                    obs, _ = envs.reset()
-                    episode_started = np.ones((envs.num_envs,))
+                        if track:
+                            log(eval_metrics, step=total_steps)
+
+                        # Checkpointing
+                        if checkpoint_manager is not None:
+                            if not episode_started.all():
+                                raise NotImplementedError(
+                                    "Checkpointing currently doesn't work for the case where evaluation is run before all envs have finished their episodes / are about to be reset."
+                                )
+
+                            checkpoint_manager.save(
+                                total_steps,
+                                args=get_checkpoint_save_args(
+                                    self,
+                                    envs,
+                                    global_step,
+                                    episodes_ended,
+                                    run_timestamp,
+                                ),
+                                metrics={
+                                    k.removeprefix("charts/"): v
+                                    for k, v in eval_metrics.items()
+                                },
+                            )
+
+                        # Reset envs again to exit eval mode
+                        obs, _ = envs.reset()
+                        episode_started = np.ones((envs.num_envs,))
+                    else:
+                        mean_success_rate, mean_returns, mean_success_per_task = (
+                            env_config.evaluate(eval_env, self)
+                        )
+                        eval_metrics = {
+                            "charts/mean_success_rate": float(mean_success_rate),
+                            "charts/mean_evaluation_return": float(mean_returns),
+                        } | {
+                            f"charts/{task_name}_success_rate": float(success_rate)
+                            for task_name, success_rate in mean_success_per_task.items()
+                        }
+                        print(
+                            f"total_steps={total_steps}, mean evaluation success rate: {mean_success_rate:.4f}"
+                            + f" return: {mean_returns:.4f}"
+                        )
+
+                        returns_ref = np.ones(len(mean_success_per_task))
+                        returns = [
+                            success_rate
+                            for success_rate in mean_success_per_task.values()
+                        ]
+                        for i in range (len(dist)):
+                            dist[i] = self.exponentiated_gradient_ascent_step(w=dist[i], returns=returns, returns_ref=returns_ref)
+                        print(returns_ref)
+                        print(returns)
+                        print(dist)
+                        self.set_task_distributions(envs, dist)
+                        dro_dist_metrics = {
+                            f"dro/{task_name}_sample_weight": dist[0][i]
+                            for i, (task_name, success_rate) in enumerate(mean_success_per_task.items())
+                        }
+
+                        task_step_counts = {task_name: 0 for task_name in task_names}
+
+                        if track:
+                            log(eval_metrics, step=total_steps)
+                            log(dro_dist_metrics, step=total_steps)
+
+                        # Checkpointing
+                        if checkpoint_manager is not None:
+                            if not episode_started.all():
+                                raise NotImplementedError(
+                                    "Checkpointing currently doesn't work for the case where evaluation is run before all envs have finished their episodes / are about to be reset."
+                                )
+
+                            checkpoint_manager.save(
+                                total_steps,
+                                args=get_checkpoint_save_args(
+                                    self,
+                                    eval_env,
+                                    global_step,
+                                    episodes_ended,
+                                    run_timestamp,
+                                ),
+                                metrics={
+                                    k.removeprefix("charts/"): v
+                                    for k, v in eval_metrics.items()
+                                },
+                            )
+
+                        # Reset envs again to exit eval mode
+                        # obs, _ = envs.reset()
+                        eval_env.reset()
+                        episode_started = np.ones((envs.num_envs,))
 
         return self
