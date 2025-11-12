@@ -104,10 +104,10 @@ class Run:
         )
 
     def start(self) -> None:
-        if jax.device_count("gpu") < 1 and jax.device_count("tpu") < 1:
-            raise RuntimeError(
-                "No accelerator found, aborting. Devices: %s" % jax.devices()
-            )
+        # if jax.device_count("gpu") < 1 and jax.device_count("tpu") < 1:
+        #     raise RuntimeError(
+        #         "No accelerator found, aborting. Devices: %s" % jax.devices()
+        #     )
 
         envs = self.env.spawn(seed=self.seed)
         if self.eval_env is not None:

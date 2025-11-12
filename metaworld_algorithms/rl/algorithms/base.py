@@ -754,8 +754,8 @@ class OnPolicyAlgorithm(
         )
 
     @staticmethod
-    def exponentiated_gradient_ascent_step(w, returns, returns_ref, learning_rate=1.0,
-                                           eps=0.1):
+    def exponentiated_gradient_ascent_step(w, returns, returns_ref, learning_rate=0.1,
+                                           eps=0.1, env_id=0):
         # Use s_t - s_{t-1} instead of s_ref - s_t
         diff = np.clip(returns_ref - returns, 0, np.inf)
 
@@ -767,6 +767,10 @@ class OnPolicyAlgorithm(
         # Smoothing to prevent weights form getting too close to 0
         w_uniform = 1 / len(w_new) * np.ones(len(w_new))
         w_new = (1 - eps) * w_new + eps * w_uniform
+
+        # w_focus = np.zeros(len(w_new))
+        # w_focus[env_id] = 1.0
+        # w_new = 0.5 * w_new + 0.5 * w_focus
 
         return w_new
     
@@ -846,11 +850,14 @@ class OnPolicyAlgorithm(
             task_step_counts = {task_name: 0 for task_name in task_names}
 
             dist = []
-            for task_i in tasks:
+            for i, task_i in enumerate(tasks):
                 # print("This ENV:")
                 # for task in task_i:
                 #     print(f"Task Name: {task.env_name}")
-                dist.append(np.ones(len(task_names)) / len(task_names))
+                # curr_dist = np.ones(len(task_names)) / len(task_names)
+                curr_dist = np.zeros_like(task_names, dtype=float)
+                curr_dist[i] = 1.0
+                dist.append(curr_dist)
             self.set_task_distributions(envs, dist)
 
         episode_started = np.ones((envs.num_envs,))
@@ -866,6 +873,7 @@ class OnPolicyAlgorithm(
         
         # Track update count for DRO updates
         update_count = 0
+        eval_count = 0
         
         # Get dro_upd_num_steps from algorithm if available
         dro_upd_num_steps = getattr(self, 'dro_upd_num_steps', None)
@@ -920,36 +928,9 @@ class OnPolicyAlgorithm(
 
                     for i, sub_obs in enumerate(obs):
                         prt_obs = list(sub_obs)
-                        prt_obs = prt_obs[-10:-1]
+                        prt_obs = prt_obs[-10:0]
                         prt_obs = np.array(prt_obs, dtype=int)
                         print(f"One-hot Embedding for Env {i}: {prt_obs}; Task Name for Env {i}: {current_task_names[i]}")
-
-                    print("\n" + "=" * 60)
-                    print("Task Activity Statistics:")
-                    print("=" * 60)
-                    total_steps_tracked = sum(task_step_counts.values())
-
-                    # Sort by step count (descending)
-                    mt10_tasks = task_step_counts.items()
-
-                    task_perc = {}
-
-                    print(f"{'Task Name':<30} {'Steps':>10} {'Percentage':>12}")
-                    print("-" * 60)
-                    for task_name, step_count in mt10_tasks:
-                        percentage = (step_count / total_steps_tracked * 100) if total_steps_tracked > 0 else 0
-                        print(f"{task_name:<30} {step_count:>10} {percentage:>11.2f}%")
-                        task_perc[task_name] = percentage
-
-                    print("=" * 60)
-
-                    if track:
-                        log({
-                            f"dro/{task_name}_average_sampling_percentage": percentage
-                            for task_name, percentage in task_perc.items()
-                        }, step = total_steps)
-
-                    # task_step_counts = {task_name: 0 for task_name in MT10_TASK_NAMES}
 
                 if track:
                     log(
@@ -985,6 +966,34 @@ class OnPolicyAlgorithm(
                 rollout_buffer.reset()
                 update_count += 1
 
+                if dro:
+                    print("\n" + "=" * 60)
+                    print("Task Activity Statistics:")
+                    print("=" * 60)
+                    total_steps_tracked = sum(task_step_counts.values())
+
+                    # Sort by step count (descending)
+                    mt10_tasks = task_step_counts.items()
+
+                    task_perc = {}
+
+                    print(f"{'Task Name':<30} {'Steps':>10} {'Percentage':>12}")
+                    print("-" * 60)
+                    for task_name, step_count in mt10_tasks:
+                        percentage = (step_count / total_steps_tracked * 100) if total_steps_tracked > 0 else 0
+                        print(f"{task_name:<30} {step_count:>10} {percentage:>11.2f}%")
+                        task_perc[task_name] = percentage
+
+                    print("=" * 60)
+
+                    if track:
+                        log({
+                            f"dro/{task_name}_average_sampling_percentage": percentage
+                            for task_name, percentage in task_perc.items()
+                        }, step = total_steps)
+
+                    task_step_counts = {task_name: 0 for task_name in task_names}
+
                 if track:
                     log(logs, step=total_steps)
 
@@ -995,6 +1004,7 @@ class OnPolicyAlgorithm(
                     and episode_started.any()
                     and global_step > 0
                 ):
+                    eval_count += 1
                     if eval_env is None or dro==False:
                         mean_success_rate, mean_returns, mean_success_per_task = (
                             env_config.evaluate(envs, self)
@@ -1061,13 +1071,20 @@ class OnPolicyAlgorithm(
                             for success_rate in mean_success_per_task.values()
                         ]
                         for i in range (len(dist)):
-                            dist[i] = self.exponentiated_gradient_ascent_step(w=dist[i], returns=returns, returns_ref=returns_ref)
+                            dist[i] = self.exponentiated_gradient_ascent_step(w=dist[i], returns=returns, returns_ref=returns_ref, env_id=i)
                         print(returns_ref)
                         print(returns)
                         print(dist)
+                        # if eval_count >= 10:
                         self.set_task_distributions(envs, dist)
+                        real_dist = []
+                        for i in range (len(dist[0])):
+                            cur_val = 0.0
+                            for j in range(len(dist)):
+                                cur_val += dist[j][i]
+                            real_dist.append(cur_val)
                         dro_dist_metrics = {
-                            f"dro/{task_name}_sample_weight": dist[0][i]
+                            f"dro/{task_name}_sample_weight": real_dist[i]
                             for i, (task_name, success_rate) in enumerate(mean_success_per_task.items())
                         }
 
