@@ -21,6 +21,7 @@ class Args:
     track: bool = False
     wandb_project: str | None = None
     wandb_entity: str | None = None
+    wandb_group: str | None = None
     data_dir: Path = Path("./run_results")
     resume: bool = False
 
@@ -69,6 +70,7 @@ def main() -> None:
         run.enable_wandb(
             project=args.wandb_project,
             entity=args.wandb_entity,
+            group=args.wandb_group,
             config=run,
             resume="allow",
         )

@@ -8,6 +8,8 @@ log = ../../$(log_dir)/$(Process).log
 output = ../../$(log_dir)/$(Process).out
 error = ../../$(log_dir)/$(Process).err
 
+arguments = $(Step)
+
 should_transfer_files = YES
 when_to_transfer_output = ON_EXIT
 
@@ -17,4 +19,4 @@ request_disk = 40GB
 
 requirements = (Target.HasCHTCStaging == true)
 
-queue 1
+queue $(num_jobs)
