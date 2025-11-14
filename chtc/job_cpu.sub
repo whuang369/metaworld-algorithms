@@ -2,13 +2,13 @@
 
 universe = vanilla
 
-executable = $(commands_file).sh
+executable = job_cpu.sh
 initial_dir = $(results_dir)
 log = ../../$(log_dir)/$(Process).log
 output = ../../$(log_dir)/$(Process).out
 error = ../../$(log_dir)/$(Process).err
 
-arguments = $(Step)
+arguments = $(Process) $(Step) $(command)
 
 should_transfer_files = YES
 when_to_transfer_output = ON_EXIT
@@ -19,4 +19,4 @@ request_disk = 40GB
 
 requirements = (Target.HasCHTCStaging == true)
 
-queue $(num_jobs)
+queue $(num_jobs) command from $(commands_file)

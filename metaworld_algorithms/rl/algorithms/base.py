@@ -754,7 +754,7 @@ class OnPolicyAlgorithm(
         )
 
     @staticmethod
-    def exponentiated_gradient_ascent_step(w, returns, returns_ref, learning_rate=1,
+    def exponentiated_gradient_ascent_step(w, returns, returns_ref, learning_rate=0.1,
                                            eps=0.05, env_id=0):
         # Use s_t - s_{t-1} instead of s_ref - s_t
         diff = np.clip(returns_ref - returns, 0, np.inf)
@@ -959,11 +959,11 @@ class OnPolicyAlgorithm(
 
                 task_perc = {}
 
-                print(f"{'Task Name':<30} {'Steps':>10} {'Percentage':>12}")
+                print(f"{'Task Name':<30} {'Steps':>10} {'% Sampled':>12} {'Task Weight':>12}")
                 print("-" * 60)
-                for task_name, step_count in mt10_tasks:
+                for i, (task_name, step_count) in enumerate(mt10_tasks):
                     percentage = (step_count / total_steps_tracked * 100) if total_steps_tracked > 0 else 0
-                    print(f"{task_name:<30} {step_count:>10} {percentage:>11.2f}%")
+                    print(f"{task_name:<30} {step_count:>10} {percentage:>11.2f}% {dist[i]:>11.2f}%")
                     task_perc[task_name] = percentage
 
                 print("=" * 60)
@@ -978,7 +978,7 @@ class OnPolicyAlgorithm(
                 task_attempts[task_attempts == 0] = 1
                 mean_success_per_task = task_successes / task_attempts
                 success_ref = np.ones(len(mean_success_per_task))
-                success_ref[4] = 0 # we cannot solve drawer-open
+                # success_ref[4] = 0 # we cannot solve drawer-open # actually yes we can.
 
                 dist = self.exponentiated_gradient_ascent_step(w=dist, returns=mean_success_per_task, returns_ref=success_ref, env_id=i)
                 self.set_task_distributions(envs, dist)

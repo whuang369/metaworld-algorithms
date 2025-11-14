@@ -1,12 +1,16 @@
 results_dir=results/${1}
 log_dir=logs/${1}
-commands_file=scripts/${1}
-
 mkdir -p ${results_dir}
 mkdir -p ${log_dir}
+
+# make a temp commands file where spaces are replaced with * so that multi-word commands are properly parsed by the queue command
+commands_file=commands/${1}.sh
+commands_file_tmp=commands/${1}_tmp.sh
+sed 's/ /*/g' "$commands_file" > "$commands_file_tmp"
 
 condor_submit job.sub \
   results_dir=${results_dir} \
   log_dir=${log_dir} \
-  commands_file=${commands_file} \
-  job_length=${2}
+  commands_file=${commands_file_tmp} \
+  num_jobs=${2:-1}
+  job_length=${3:-"short"}

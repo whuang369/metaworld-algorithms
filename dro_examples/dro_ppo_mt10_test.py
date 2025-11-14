@@ -65,7 +65,7 @@ def main() -> None:
             # dro_success_ref=np.array([1, 1, 1, 0, 1, 1, 1, 1, 1, 1])
         ),
         training_config=OnPolicyTrainingConfig(
-            total_steps=int(2e7),
+            total_steps=int(1e6),
             rollout_steps=10_000,
             evaluation_frequency=1_000_000 // 2500, # is this a reasonable evaluation frequency?
         ),
