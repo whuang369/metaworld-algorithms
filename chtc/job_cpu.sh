@@ -16,7 +16,7 @@ uv pip install -e ./metaworld/custom-envs
 uv pip install packaging
 
 wandb login 7313077863c8908c24cc6058b99c2b2cc35d326b
-export WANDB_MODE=offline
+#export WANDB_MODE=offline
 
 pid=$1  # ranges from 0 to num_commands*num_jobs-1
 step=$2 # ranges from 0 to num_jobs-1
@@ -24,7 +24,7 @@ cmd=`tr '*' ' ' <<< $3` # replace * with space
 cmd="${cmd} --seed ${step}"
 echo $cmd
 
-tar czvf results_${pid}.tar.gz run_results
-mv results_${pid}.tar.gz ..
+#tar czvf results_${pid}.tar.gz run_results
+#mv results_${pid}.tar.gz ..
 
 $cmd

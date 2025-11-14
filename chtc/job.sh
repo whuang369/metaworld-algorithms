@@ -23,5 +23,5 @@ cmd=`tr '*' ' ' <<< $3` # replace * with space
 cmd="${cmd} --seed ${step}"
 echo $cmd
 
-export WANDB_MODE=offline
+#export WANDB_MODE=offline
 $cmd
