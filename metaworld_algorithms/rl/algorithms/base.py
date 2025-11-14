@@ -776,7 +776,7 @@ class OnPolicyAlgorithm(
             p = p / p.sum()  # renormalize
             return p
 
-        w_new = clip_and_normalize(w_new, c=0.01)
+        w_new = clip_and_normalize(w_new, c=0.03)
 
         return w_new
     
