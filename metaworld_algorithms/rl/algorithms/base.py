@@ -978,6 +978,7 @@ class OnPolicyAlgorithm(
                 task_attempts[task_attempts == 0] = 1
                 mean_success_per_task = task_successes / task_attempts
                 success_ref = np.ones(len(mean_success_per_task))
+                success_ref[4] = 0 # we cannot solve drawer-open
 
                 dist = self.exponentiated_gradient_ascent_step(w=dist, returns=mean_success_per_task, returns_ref=success_ref, env_id=i)
                 self.set_task_distributions(envs, dist)
@@ -989,6 +990,8 @@ class OnPolicyAlgorithm(
                     f"dro/{task_name}_sample_weight": dist[i]
                     for i, task_name in enumerate(task_names)
                 }
+                for i, task_name in enumerate(task_names):
+                    dro_dist_metrics[f'dro/{task_name}_success_rate'] = mean_success_per_task[i]
 
                 task_step_counts = {task_name: 0 for task_name in task_names}
                 task_successes[:] = 0
