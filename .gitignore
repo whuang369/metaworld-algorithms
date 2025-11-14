@@ -177,3 +177,4 @@ flake.nix
 flake.lock
 
 run_results/
+/metaworld/metaworld.egg-info/

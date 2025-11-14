@@ -16,7 +16,7 @@ uv pip install -e ./metaworld
 uv pip install -e ./metaworld/custom-envs
 uv pip install packaging
 
-wandb login 7313077863c8908c24cc6058b99c2b2cc35d326b
+wandb login d0dbec0b8f79cdb57ef36ae46bb16a336954b2ca
 
 pid=$1  # ranges from 0 to num_commands*num_jobs-1
 step=$2 # ranges from 0 to num_jobs-1
