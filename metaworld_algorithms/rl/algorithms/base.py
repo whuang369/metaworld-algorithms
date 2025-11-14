@@ -754,8 +754,8 @@ class OnPolicyAlgorithm(
         )
 
     @staticmethod
-    def exponentiated_gradient_ascent_step(w, returns, returns_ref, learning_rate=0.1,
-                                           eps=0.1, env_id=0):
+    def exponentiated_gradient_ascent_step(w, returns, returns_ref, learning_rate=1,
+                                           eps=0.05, env_id=0):
         # Use s_t - s_{t-1} instead of s_ref - s_t
         diff = np.clip(returns_ref - returns, 0, np.inf)
 
@@ -771,13 +771,19 @@ class OnPolicyAlgorithm(
         # w_focus = np.zeros(len(w_new))
         # w_focus[env_id] = 1.0
         # w_new = 0.5 * w_new + 0.5 * w_focus
+        def clip_and_normalize(p, c=0.01):
+            p = np.maximum(p, c)  # clip
+            p = p / p.sum()  # renormalize
+            return p
+
+        w_new = clip_and_normalize(w_new, c=0.01)
 
         return w_new
     
     @staticmethod
     def set_task_distributions(
         envs: GymVectorEnv,
-        distributions: list[npt.NDArray[np.float64]],
+        distribution: npt.NDArray[np.float64],
     ) -> None:
         """Set the task probability distribution for all environments in the vector environment.
         
@@ -790,13 +796,13 @@ class OnPolicyAlgorithm(
 
         if isinstance(envs, gym.vector.SyncVectorEnv):
             # SyncVectorEnv has envs attribute
-            for env_idx, dist in enumerate(distributions):
+            for env_idx in range(len(distribution)):
                 env = envs.envs[env_idx]
                 # Navigate through wrappers to find DROWrapper or MultiTaskDROWrapper
                 current = env
                 while current is not None:
                     if isinstance(current, (DROWrapper, MultiTaskDROWrapper)):
-                        current.set_task_distribution(dist)
+                        current.set_task_distribution(distribution)
                         break
                     # Move to next wrapper
                     if hasattr(current, 'env'):
@@ -807,7 +813,7 @@ class OnPolicyAlgorithm(
             # AsyncVectorEnv - use call method to set task distribution
             # Since AsyncVectorEnv doesn't expose envs attribute, we use call() method
             # The call() method will find set_task_distribution on DROWrapper or MultiTaskDROWrapper in the wrapper chain
-            envs.call('set_task_distribution', distributions)
+            envs.call('set_task_distribution', distribution)
 
     @override
     def train(
@@ -826,6 +832,8 @@ class OnPolicyAlgorithm(
     ) -> Self:
         global_episodic_return: Deque[float] = deque([], maxlen=20 * self.num_tasks)
         global_episodic_length: Deque[int] = deque([], maxlen=20 * self.num_tasks)
+        task_successes = np.zeros(self.num_tasks)
+        task_attempts = np.zeros(self.num_tasks)
 
         obs, _ = envs.reset()
 
@@ -848,16 +856,7 @@ class OnPolicyAlgorithm(
             print(f"TASK NAMES: {task_names}")
 
             task_step_counts = {task_name: 0 for task_name in task_names}
-
-            dist = []
-            for i, task_i in enumerate(tasks):
-                # print("This ENV:")
-                # for task in task_i:
-                #     print(f"Task Name: {task.env_name}")
-                # curr_dist = np.ones(len(task_names)) / len(task_names)
-                curr_dist = np.zeros_like(task_names, dtype=float)
-                curr_dist[i] = 1.0
-                dist.append(curr_dist)
+            dist = np.ones(self.num_tasks)/self.num_tasks
             self.set_task_distributions(envs, dist)
 
         episode_started = np.ones((envs.num_envs,))
@@ -874,9 +873,8 @@ class OnPolicyAlgorithm(
         # Track update count for DRO updates
         update_count = 0
         eval_count = 0
-        
-        # Get dro_upd_num_steps from algorithm if available
-        dro_upd_num_steps = getattr(self, 'dro_upd_num_steps', None)
+
+        dro_num_steps = getattr(self, 'dro_upd_num_steps', None)
 
         for global_step in range(start_step, config.total_steps // envs.num_envs):
             total_steps = global_step * envs.num_envs
@@ -917,6 +915,11 @@ class OnPolicyAlgorithm(
                     global_episodic_length.append(
                         infos["final_info"]["episode"]["l"][i]
                     )
+                    # print(infos["final_obs"][i][-self.num_tasks:])
+                    task_id = np.argmax(infos["final_obs"][i][-self.num_tasks:])
+                    task_successes[task_id] += infos["final_info"]["success"][i]
+                    task_attempts[task_id] += 1
+
                     episodes_ended += 1
 
             if global_step % 500 == 0 and global_episodic_return:
@@ -928,9 +931,9 @@ class OnPolicyAlgorithm(
 
                     for i, sub_obs in enumerate(obs):
                         prt_obs = list(sub_obs)
-                        prt_obs = prt_obs[-10:0]
+                        prt_obs = prt_obs[-10:]
                         prt_obs = np.array(prt_obs, dtype=int)
-                        print(f"One-hot Embedding for Env {i}: {prt_obs}; Task Name for Env {i}: {current_task_names[i]}")
+                        # print(f"One-hot Embedding for Env {i}: {prt_obs}; Task Name for Env {i}: {current_task_names[i]}")
 
                 if track:
                     log(
@@ -944,6 +947,55 @@ class OnPolicyAlgorithm(
                         },
                         step=total_steps,
                     )
+
+            if dro and (global_step+1) % dro_num_steps == 0:
+                print("\n" + "=" * 60)
+                print("Task Activity Statistics:")
+                print("=" * 60)
+                total_steps_tracked = sum(task_step_counts.values())
+
+                # Sort by step count (descending)
+                mt10_tasks = task_step_counts.items()
+
+                task_perc = {}
+
+                print(f"{'Task Name':<30} {'Steps':>10} {'Percentage':>12}")
+                print("-" * 60)
+                for task_name, step_count in mt10_tasks:
+                    percentage = (step_count / total_steps_tracked * 100) if total_steps_tracked > 0 else 0
+                    print(f"{task_name:<30} {step_count:>10} {percentage:>11.2f}%")
+                    task_perc[task_name] = percentage
+
+                print("=" * 60)
+
+                if track:
+                    log({
+                        f"dro/{task_name}_average_sampling_percentage": percentage
+                        for task_name, percentage in task_perc.items()
+                    }, step = total_steps)
+
+                # success rate should be zero for tasks we did not sample.
+                task_attempts[task_attempts == 0] = 1
+                mean_success_per_task = task_successes / task_attempts
+                success_ref = np.ones(len(mean_success_per_task))
+
+                dist = self.exponentiated_gradient_ascent_step(w=dist, returns=mean_success_per_task, returns_ref=success_ref, env_id=i)
+                self.set_task_distributions(envs, dist)
+
+                print(mean_success_per_task)
+                print(dist)
+
+                dro_dist_metrics = {
+                    f"dro/{task_name}_sample_weight": dist[i]
+                    for i, task_name in enumerate(task_names)
+                }
+
+                task_step_counts = {task_name: 0 for task_name in task_names}
+                task_successes[:] = 0
+                task_attempts[:] = 0
+
+                if track:
+                    log(dro_dist_metrics, step=total_steps)
 
             # Logging
             if global_step % 1_000 == 0:
@@ -965,34 +1017,6 @@ class OnPolicyAlgorithm(
                 )
                 rollout_buffer.reset()
                 update_count += 1
-
-                if dro:
-                    print("\n" + "=" * 60)
-                    print("Task Activity Statistics:")
-                    print("=" * 60)
-                    total_steps_tracked = sum(task_step_counts.values())
-
-                    # Sort by step count (descending)
-                    mt10_tasks = task_step_counts.items()
-
-                    task_perc = {}
-
-                    print(f"{'Task Name':<30} {'Steps':>10} {'Percentage':>12}")
-                    print("-" * 60)
-                    for task_name, step_count in mt10_tasks:
-                        percentage = (step_count / total_steps_tracked * 100) if total_steps_tracked > 0 else 0
-                        print(f"{task_name:<30} {step_count:>10} {percentage:>11.2f}%")
-                        task_perc[task_name] = percentage
-
-                    print("=" * 60)
-
-                    if track:
-                        log({
-                            f"dro/{task_name}_average_sampling_percentage": percentage
-                            for task_name, percentage in task_perc.items()
-                        }, step = total_steps)
-
-                    task_step_counts = {task_name: 0 for task_name in task_names}
 
                 if track:
                     log(logs, step=total_steps)
@@ -1064,35 +1088,10 @@ class OnPolicyAlgorithm(
                             f"total_steps={total_steps}, mean evaluation success rate: {mean_success_rate:.4f}"
                             + f" return: {mean_returns:.4f}"
                         )
-
-                        returns_ref = np.ones(len(mean_success_per_task))
-                        returns = [
-                            success_rate
-                            for success_rate in mean_success_per_task.values()
-                        ]
-                        for i in range (len(dist)):
-                            dist[i] = self.exponentiated_gradient_ascent_step(w=dist[i], returns=returns, returns_ref=returns_ref, env_id=i)
-                        print(returns_ref)
-                        print(returns)
-                        print(dist)
-                        # if eval_count >= 10:
-                        self.set_task_distributions(envs, dist)
-                        real_dist = []
-                        for i in range (len(dist[0])):
-                            cur_val = 0.0
-                            for j in range(len(dist)):
-                                cur_val += dist[j][i]
-                            real_dist.append(cur_val)
-                        dro_dist_metrics = {
-                            f"dro/{task_name}_sample_weight": real_dist[i]
-                            for i, (task_name, success_rate) in enumerate(mean_success_per_task.items())
-                        }
-
-                        task_step_counts = {task_name: 0 for task_name in task_names}
+                        print(mean_success_per_task)
 
                         if track:
                             log(eval_metrics, step=total_steps)
-                            log(dro_dist_metrics, step=total_steps)
 
                         # Checkpointing
                         if checkpoint_manager is not None:

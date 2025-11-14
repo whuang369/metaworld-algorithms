@@ -58,12 +58,12 @@ def main() -> None:
             target_kl=None,
             clip_vf_loss=False,
             normalize_advantages=False,
-            dro_upd_num_steps=1,
+            dro_upd_num_steps=50_000, # 100 trajectories
         ),
         training_config=OnPolicyTrainingConfig(
             total_steps=int(2e7),
             rollout_steps=10_000,
-            evaluation_frequency=1_000_000 // 2500,
+            evaluation_frequency=1_000_000 // 2500, # is this a reasonable evaluation frequency?
         ),
         checkpoint=True,
         resume=args.resume,

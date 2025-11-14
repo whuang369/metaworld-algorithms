@@ -221,32 +221,42 @@ class LinearFeatureBaseline:
 
     @classmethod
     def _fit_baseline(
-        cls,
-        observations: Float[npt.NDArray, "task rollout timestep obs_dim"],
-        returns: Float[npt.NDArray, "task rollout timestep 1"],
-        reg_coeff: float = 1e-5,
+            cls,
+            observations: np.ndarray,  # (S, R, T, obs_dim)
+            returns: np.ndarray,  # (S, R, T, 1)
+            reg_coeff: float = 1e-5,
     ) -> np.ndarray:
-        features = cls._extract_features(observations)
-        target = returns.reshape(returns.shape[0], -1, 1)
+
+        S, R, T, obs_dim = observations.shape
+        # Infer actual task IDs
+        task_ids = observations[..., -10:].argmax(-1)  # (S, R, T)
+
+        features = cls._extract_features(observations, reshape=False)  # (S, R, T, F)
+        F = features.shape[-1]
+
+        # Accumulate normal eq terms for each real task k
+        XtX = np.zeros((10, F, F))
+        Xty = np.zeros((10, F, 1))
+
+        for k in range(10):
+            mask = (task_ids == k)  # (S,R,T)
+            if not mask.any():
+                continue
+
+            Xk = features[mask]  # (Nk, F)
+            yk = returns[mask]  # (Nk, 1)
+            # Accumulate
+            XtX[k] = Xk.T @ Xk
+            Xty[k] = Xk.T @ yk
 
         coeffs = []
-        task_coeffs = np.zeros(features.shape[1])
-        for task in range(observations.shape[0]):
-            featmat = features[task]
-            _target = target[task]
-            for _ in range(5):
-                task_coeffs = np.linalg.lstsq(
-                    featmat.T @ featmat + reg_coeff * np.identity(featmat.shape[1]),
-                    featmat.T @ _target,
-                    rcond=-1,
-                )[0]
-                if not np.any(np.isnan(task_coeffs)):
-                    break
-                reg_coeff *= 10
+        for k in range(10):
+            A = XtX[k] + reg_coeff * np.eye(F)
+            b = Xty[k]
+            w, *_ = np.linalg.lstsq(A, b, rcond=-1)
+            coeffs.append(w)  # (F,1)
 
-            coeffs.append(np.expand_dims(task_coeffs, axis=0))
-
-        return np.stack(coeffs)
+        return np.stack(coeffs, axis=0)  # (10, F, 1)
 
     @classmethod
     def get_baseline_values_and_returns(
@@ -285,8 +295,12 @@ class LinearFeatureBaseline:
         coeffs = cls._fit_baseline(observations, returns)
         features = cls._extract_features(observations, reshape=False)
 
-        return _reshape(features @ coeffs), _reshape(returns)
+        # predict using true task ids per timestep
+        task_ids = observations[..., -10:].argmax(-1)
+        coeffs_for_samples = coeffs[task_ids, :, 0]  # (S, R, T, F)
+        values = (features * coeffs_for_samples).sum(axis=-1, keepdims=True)
 
+        return _reshape(values), _reshape(returns)
 
 def swap_rollout_axes(rollout: Rollout, axis1: int, axis2: int) -> Rollout:
     return Rollout(
