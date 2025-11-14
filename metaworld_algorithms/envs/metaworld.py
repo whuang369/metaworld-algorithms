@@ -11,7 +11,6 @@ from metaworld_algorithms.types import Agent, MetaLearningAgent, GymVectorEnv
 
 from metaworld_algorithms.config.envs import EnvConfig, MetaLearningEnvConfig
 from metaworld.evaluation import evaluation, metalearning_evaluation
-from metaworld.wrappers import DROWrapper
 
 
 @dataclass(frozen=True)

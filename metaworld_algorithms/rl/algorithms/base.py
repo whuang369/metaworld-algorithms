@@ -813,7 +813,6 @@ class OnPolicyAlgorithm(
             # AsyncVectorEnv - use call method to set task distribution
             # Since AsyncVectorEnv doesn't expose envs attribute, we use call() method
             # The call() method will find set_task_distribution on MultiTaskDROWrapper in the wrapper chain
-            print(distribution)
             envs.call('set_task_distribution', distribution)
 
     @override
