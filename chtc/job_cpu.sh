@@ -1,7 +1,8 @@
 #!/bin/bash
 
 CODENAME=metaworld-algorithms
-cp /staging/ncorrado/${CODENAME}.tar.gz .
+USER_NAME=$4
+cp /staging/${USER_NAME}/${CODENAME}.tar.gz .
 tar -xzf ${CODENAME}.tar.gz
 rm ${CODENAME}.tar.gz
 cd ${CODENAME}

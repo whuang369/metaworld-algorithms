@@ -8,9 +8,12 @@ commands_file=commands/${1}.sh
 commands_file_tmp=commands/${1}_tmp.sh
 sed 's/ /*/g' "$commands_file" > "$commands_file_tmp"
 
+USER_NAME=whuang369
+
 condor_submit job.sub \
   results_dir=${results_dir} \
   log_dir=${log_dir} \
   commands_file=${commands_file_tmp} \
-  num_jobs=${2:-1}
-  job_length=${3:-"short"}
+  num_jobs=${2:-1} \
+  job_length=${3:-"short"} \
+  user_name=${USER_NAME}
