@@ -178,3 +178,4 @@ flake.lock
 
 run_results/
 /metaworld/metaworld.egg-info/
+/token.txt
