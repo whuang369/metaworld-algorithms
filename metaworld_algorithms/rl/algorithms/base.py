@@ -792,16 +792,16 @@ class OnPolicyAlgorithm(
             distributions: List of probability distributions, one per environment in the vector env.
                           Each distribution is an array of probabilities for tasks in that environment.
         """
-        from metaworld.wrappers import DROWrapper, MultiTaskDROWrapper
+        from metaworld.wrappers import MultiTaskDROWrapper
 
         if isinstance(envs, gym.vector.SyncVectorEnv):
             # SyncVectorEnv has envs attribute
             for env_idx in range(len(distribution)):
                 env = envs.envs[env_idx]
-                # Navigate through wrappers to find DROWrapper or MultiTaskDROWrapper
+                # Navigate through wrappers to find or MultiTaskDROWrapper
                 current = env
                 while current is not None:
-                    if isinstance(current, (DROWrapper, MultiTaskDROWrapper)):
+                    if isinstance(current, (MultiTaskDROWrapper)):
                         current.set_task_distribution(distribution)
                         break
                     # Move to next wrapper
@@ -812,7 +812,8 @@ class OnPolicyAlgorithm(
         else:
             # AsyncVectorEnv - use call method to set task distribution
             # Since AsyncVectorEnv doesn't expose envs attribute, we use call() method
-            # The call() method will find set_task_distribution on DROWrapper or MultiTaskDROWrapper in the wrapper chain
+            # The call() method will find set_task_distribution on MultiTaskDROWrapper in the wrapper chain
+            print(distribution)
             envs.call('set_task_distribution', distribution)
 
     @override

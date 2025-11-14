@@ -1,1 +1,5 @@
-python dro_examples/dro_ppo_mt10.py --track --wandb_entity 'nicholascorrado' --wandb_project 'metaworld' --wandb_group 'dro_ppo_mt10/lr_0.1'
+python dro_examples/dro_ppo_mt10.py --track \
+  --wandb_entity 'whuang369-university-of-wisconsin-madison' \
+  --wandb_project 'metaworld_dro_local_test' \
+  --wandb_group 'dro/ppo_mt10' \
+  --seed 1
