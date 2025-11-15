@@ -12,7 +12,7 @@ class EnvConfig(abc.ABC):
     env_id: str
     use_one_hot: bool = True
     max_episode_steps: int = 500
-    evaluation_num_episodes: int = 50
+    evaluation_num_episodes: int = 100
     terminate_on_success: bool = False
 
     @cached_property

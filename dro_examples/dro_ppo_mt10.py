@@ -62,12 +62,12 @@ def main() -> None:
             dro_upd_num_steps=10_000, # this is per environment, so this is 100k steps = 200 trajectories
             # dro_lr=0.1,
             # dro_eps=0.05,
-            # dro_success_ref=np.array([1, 1, 1, 0, 1, 1, 1, 1, 1, 1])
+            # dro_success_ref=np.array([1, 1, 1, 1, 1, 1, 1, 1, 1, 1])
         ),
         training_config=OnPolicyTrainingConfig(
             total_steps=int(2e7),
             rollout_steps=10_000,
-            evaluation_frequency=1_000_000 // 2500, # is this a reasonable evaluation frequency?
+            evaluation_frequency=1_000_000 // 500,
         ),
         checkpoint=True,
         resume=args.resume,
