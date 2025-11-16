@@ -1,0 +1,1 @@
+python dro_examples/dro_ppo_mt10.py --track --wandb_entity whuang369-university-of-wisconsin-madison --wandb_project metaworld_dro --wandb_group dro/gpu/ppo_mt10_lr=0.3 --dro_learning_rate 0.3

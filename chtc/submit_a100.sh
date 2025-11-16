@@ -1,5 +1,5 @@
-results_dir=results/${1}
-log_dir=logs/${1}
+results_dir=results_a100/${1}
+log_dir=logs_a100/${1}
 mkdir -p ${results_dir}
 mkdir -p ${log_dir}
 
@@ -10,7 +10,7 @@ sed 's/ /*/g' "$commands_file" > "$commands_file_tmp"
 
 USER_NAME=whuang369
 
-condor_submit job.sub \
+condor_submit job_a100.sub \
   results_dir=${results_dir} \
   log_dir=${log_dir} \
   commands_file=${commands_file_tmp} \

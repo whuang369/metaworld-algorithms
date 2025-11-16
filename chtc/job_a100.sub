@@ -26,6 +26,6 @@ request_gpus            = 1
 +WantGlidein            = false
 +GPUJobLength           = "$(job_length)"
 
-requirements = (Target.HasCHTCStaging == true) && (Target.GPUs_DeviceName == "NVIDIA GeForce RTX 2080 Ti")
+requirements = (Target.HasCHTCStaging == true) && (Target.GPUs_DeviceName == "NVIDIA A100-SXM4-80GB")
 
 queue $(num_jobs) command from $(commands_file)
