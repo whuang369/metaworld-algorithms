@@ -849,6 +849,9 @@ class OnPolicyAlgorithm(
 
         obs, _ = envs.reset()
 
+        for _ in range (1000):
+            print(dro_learning_rate)
+
         if dro:
             tasks = envs.get_attr('tasks')
 

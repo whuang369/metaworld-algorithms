@@ -1,1 +1,1 @@
-python dro_examples/dro_ppo_mt10.py --track --wandb_entity whuang369-university-of-wisconsin-madison --wandb_project metaworld_dro  --wandb_group dro/ppo_mt10
+python dro_examples/dro_ppo_mt10.py --track --wandb_entity whuang369-university-of-wisconsin-madison --wandb_project metaworld --wandb_group dro/a100/ppo_mt10/lr=0.1

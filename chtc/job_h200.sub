@@ -1,9 +1,17 @@
+# Python build file
+
 universe = vanilla
 
+executable = job.sh
 initial_dir = $(results_dir)
 log = ../../$(log_dir)/$(Process).log
 output = ../../$(log_dir)/$(Process).out
 error = ../../$(log_dir)/$(Process).err
+
+arguments = $(Process) $(Step) $(command) $(user_name)
+
+should_transfer_files = YES
+when_to_transfer_output = ON_EXIT
 
 request_cpus = 1
 request_memory = 20GB
@@ -11,19 +19,13 @@ request_disk = 40GB
 
 # Extra GPU settings
 request_gpus            = 1
-Requirements            = (Target.CUDADriverVersion >= 12.1) && (Target.GPUs_GlobalMemoryMb > 50000)
 
 # change to true if *not* using staging for checkpoints and interested in accessing GPUs beyond CHTC
 +WantGPULab = true
 +WantFlocking           = false
 +WantGlidein            = false
-+GPUJobLength           = "short"
++GPUJobLength           = "$(job_length)"
 
-should_transfer_files = YES
-when_to_transfer_output = ON_EXIT
 requirements = (Target.HasCHTCStaging == true) && (Target.CUDADriverVersion >= 12.1) && (Target.GPUs_GlobalMemoryMb > 143360)
 
-+InteractiveJob = true
-
-
-queue 1
+queue $(num_jobs) command from $(commands_file)
