@@ -110,7 +110,7 @@ class Run:
         #     raise RuntimeError(
         #         "No accelerator found, aborting. Devices: %s" % jax.devices()
         #     )
-
+        self.seed += 1
         envs = self.env.spawn(seed=self.seed)
         if self.eval_env is not None:
             eval_envs = self.eval_env.spawn(seed=self.seed)

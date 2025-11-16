@@ -180,3 +180,5 @@ run_results/
 /metaworld/metaworld.egg-info/
 /token.txt
 /metaworld/metaworld.egg-info/
+/metaworld_algorithms/plotting/results/
+/metaworld_algorithms/plotting/figures/

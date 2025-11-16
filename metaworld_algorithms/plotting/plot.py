@@ -21,32 +21,36 @@ if __name__ == "__main__":
     seaborn.set_theme(style='whitegrid')
 
     n_rows = 1
-    n_cols = 3
+    n_cols = 1
     fig = plt.figure(figsize=(9,3))
     i = 1
 
     groups = [
-        'baseline_gpu_ppo_mt10',
-        'dro_ppo_mt10_lr=0.1_gpu',
-        'dro_gpu_ppo_mt10_lr=0.3',
+        # 'baseline/h200/ppo_mt10',
+        # 'dro/h200/ppo_mt10/lr=0.1',
+        # 'baseline/a100/ppo_mt10',
+        # 'dro/a100/ppo_mt10/lr=0.1',
+        'baseline/2080/ppo_mt10',
+        'dro/2080/ppo_mt10/lr=0.1',
+        # 'dro_gpu_ppo_mt10_lr=0.3',
         # 'dro_gpu_ppo_mt10_lr=0.3',
     ]
 
     for group in groups:
-        key = f"PPO"
-        results_dir = f"wandb_export/metaworld_dro/{group}"
+        key = group
+        results_dir = f"results/{group}"
         if not os.path.exists(results_dir):
             print (f'Group {group} does not exist')
             continue
 
-        ax = plt.subplot(n_rows, n_cols, i)
-        ax.set_title(group)
-        i+=1
-
         # Now we can use dot notation which is much cleaner
-        x, y = get_data(results_dir, x_name='timestep', y_name='charts/mean_success_rate', filename='stats.npz')
+        x, y = get_data(results_dir, x_name='step', y_name='values')
         if y is not None:
             data_dict[key] = y
+
+    ax = plt.subplot(n_rows, n_cols, i)
+    # ax.set_title(group)
+    i+=1
 
     results_dict = {algorithm: score for algorithm, score in data_dict.items()}
     aggr_func = lambda scores: np.array([metrics.aggregate_iqm([scores[..., frame]]) for frame in range(scores.shape[-1])])

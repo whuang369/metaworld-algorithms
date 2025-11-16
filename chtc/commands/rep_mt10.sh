@@ -1,1 +1,1 @@
-python examples/multi_task/ppo_mt10.py --track --wandb_entity whuang369-university-of-wisconsin-madison --wandb_project metaworld_dro --wandb_group baseline/gpu/ppo_mt10
+python examples/multi_task/ppo_mt10.py --track --wandb_entity whuang369-university-of-wisconsin-madison --wandb_project metaworld --wandb_group baseline/a100/ppo_mt10
