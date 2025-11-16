@@ -54,6 +54,8 @@ class Run:
     eval_env: EnvConfig = None
 
     dro: bool = False
+    dro_learning_rate: float = 0.1
+    dro_eps: float = 0.05
 
     def __post_init__(self) -> None:
         self._wandb_enabled = False
@@ -195,7 +197,9 @@ class Run:
             checkpoint_metadata=checkpoint_metadata,
             buffer_checkpoint=buffer_checkpoint,
             eval_env=eval_envs,
-            dro=self.dro
+            dro=self.dro,
+            dro_learning_rate=self.dro_learning_rate,
+            dro_eps=self.dro_eps,
         )
 
         # Cleanup

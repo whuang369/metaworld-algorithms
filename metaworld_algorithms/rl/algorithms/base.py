@@ -82,6 +82,8 @@ class Algorithm(
         buffer_checkpoint: ReplayBufferCheckpoint | None = None,
         eval_env: GymVectorEnv = None,
         dro: bool = False,
+        dro_learning_rate: float = 0.1,
+        dro_eps: float = 0.05,
     ) -> Self: ...
 
 
@@ -120,6 +122,8 @@ class MetaLearningAlgorithm(
         buffer_checkpoint: ReplayBufferCheckpoint | None = None,
         eval_env: GymVectorEnv = None,
         dro: bool = False,
+        dro_learning_rate: float = 0.1,
+        dro_eps: float = 0.05,
     ) -> Self: ...
 
 
@@ -169,6 +173,8 @@ class GradientBasedMetaLearningAlgorithm(
         buffer_checkpoint: ReplayBufferCheckpoint | None = None,
         eval_env: GymVectorEnv = None,
         dro: bool = False,
+        dro_learning_rate: float = 0.1,
+        dro_eps: float = 0.05,
     ) -> Self:
         global_episodic_return: Deque[float] = deque([], maxlen=20 * self.num_tasks)
         global_episodic_length: Deque[int] = deque([], maxlen=20 * self.num_tasks)
@@ -381,6 +387,8 @@ class RNNBasedMetaLearningAlgorithm(
         buffer_checkpoint: ReplayBufferCheckpoint | None = None,
         eval_env: GymVectorEnv = None,
         dro: bool = False,
+        dro_learning_rate: float = 0.1,
+        dro_eps: float = 0.05,
     ) -> Self:
         global_episodic_return: Deque[float] = deque([], maxlen=20 * self.num_tasks)
         global_episodic_length: Deque[int] = deque([], maxlen=20 * self.num_tasks)
@@ -578,6 +586,8 @@ class OffPolicyAlgorithm(
         buffer_checkpoint: ReplayBufferCheckpoint | None = None,
         eval_env: GymVectorEnv = None,
         dro: bool = False,
+        dro_learning_rate: float = 0.1,
+        dro_eps: float = 0.05,
     ) -> Self:
         global_episodic_return: Deque[float] = deque([], maxlen=20 * self.num_tasks)
         global_episodic_length: Deque[int] = deque([], maxlen=20 * self.num_tasks)
@@ -829,6 +839,8 @@ class OnPolicyAlgorithm(
         buffer_checkpoint: ReplayBufferCheckpoint | None = None,
         eval_env: GymVectorEnv = None,
         dro: bool = False,
+        dro_learning_rate: float = 0.1,
+        dro_eps: float = 0.05,
     ) -> Self:
         global_episodic_return: Deque[float] = deque([], maxlen=20 * self.num_tasks)
         global_episodic_length: Deque[int] = deque([], maxlen=20 * self.num_tasks)
@@ -980,7 +992,13 @@ class OnPolicyAlgorithm(
                 success_ref = np.ones(len(mean_success_per_task))
                 # success_ref[4] = 0 # we cannot solve drawer-open # actually yes we can.
 
-                dist = self.exponentiated_gradient_ascent_step(w=dist, returns=mean_success_per_task, returns_ref=success_ref, env_id=i)
+                dist = self.exponentiated_gradient_ascent_step(w=dist,
+                                                               returns=mean_success_per_task,
+                                                               returns_ref=success_ref,
+                                                               env_id=i,
+                                                               learning_rate=dro_learning_rate,
+                                                               eps=dro_eps,
+                                                               )
                 self.set_task_distributions(envs, dist)
 
                 print(mean_success_per_task)

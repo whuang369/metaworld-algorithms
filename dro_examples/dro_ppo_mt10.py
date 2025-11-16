@@ -20,6 +20,8 @@ from metaworld_algorithms.run import Run
 class Args:
     seed: int = 1
     track: bool = True
+    dro_learning_rate: float = 0.1
+    dro_eps: float = 0.05
     wandb_project: str = 'dro'
     wandb_entity: str = 'nicholascorrado'
     data_dir: Path = Path("./run_results")
@@ -72,6 +74,8 @@ def main() -> None:
         checkpoint=True,
         resume=args.resume,
         dro=True,
+        dro_learning_rate=args.dro_learning_rate,
+        dro_eps=args.dro_eps,
     )
 
     if args.track:
