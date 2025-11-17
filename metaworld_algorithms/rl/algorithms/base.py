@@ -39,6 +39,7 @@ from metaworld_algorithms.types import (
     RNNState,
     Rollout,
 )
+from metaworld_algorithms.rl.algorithms.utils import get_task_names_from_vector_env
 
 AlgorithmConfigType = TypeVar("AlgorithmConfigType", bound=AlgorithmConfig)
 TrainingConfigType = TypeVar("TrainingConfigType", bound=TrainingConfig)
@@ -874,6 +875,20 @@ class OnPolicyAlgorithm(
             task_step_counts = {task_name: 0 for task_name in task_names}
             dist = np.ones(self.num_tasks)/self.num_tasks
             self.set_task_distributions(envs, dist)
+        else:
+            from metaworld.env_dict import ALL_V3_ENVIRONMENTS
+
+            def _get_task_names(
+                    envs: gym.vector.SyncVectorEnv | gym.vector.AsyncVectorEnv,
+            ) -> list[str]:
+                metaworld_cls_to_task_name = {v.__name__: k for k, v in ALL_V3_ENVIRONMENTS.items()}
+                return [
+                    metaworld_cls_to_task_name[task_name]
+                    for task_name in envs.get_attr("task_name")
+                ]
+
+            task_names = _get_task_names(envs)
+
 
         episode_started = np.ones((envs.num_envs,))
         start_step, episodes_ended = 0, 0
@@ -910,9 +925,6 @@ class OnPolicyAlgorithm(
             )
 
             if dro:
-
-                from metaworld_algorithms.rl.algorithms.utils import get_task_names_from_vector_env
-
                 current_task_names = get_task_names_from_vector_env(envs)
 
                 # Count active tasks (each environment contributes 1 step to its active task)
@@ -964,16 +976,6 @@ class OnPolicyAlgorithm(
                         step=total_steps,
                     )
 
-            # success rate should be zero for tasks we did not sample.
-            task_attempts[task_attempts == 0] = 1
-            mean_success_per_task = task_successes / task_attempts
-
-            train_metrics = {}
-            for i, task_name in enumerate(task_names):
-                train_metrics[f'train/{task_name}_success_rate'] = mean_success_per_task[i]
-            if track:
-                log(train_metrics, step=total_steps)
-
             if dro and (global_step+1) % dro_num_steps == 0:
                 print("\n" + "=" * 60)
                 print("Task Activity Statistics:")
@@ -994,11 +996,20 @@ class OnPolicyAlgorithm(
 
                 print("=" * 60)
 
+                # success rate should be zero for tasks we did not sample.
+                task_attempts[task_attempts == 0] = 1
+                mean_success_per_task = task_successes / task_attempts
+
+                train_metrics = {}
+                for i, task_name in enumerate(task_names):
+                    train_metrics[f'train/{task_name}_success_rate'] = mean_success_per_task[i]
+
                 if track:
                     log({
                         f"dro/{task_name}_average_sampling_percentage": percentage
                         for task_name, percentage in task_perc.items()
                     }, step = total_steps)
+                    log(train_metrics, step=total_steps)
 
                 success_ref = np.ones(len(mean_success_per_task))
                 # success_ref[4] = 0 # we cannot solve drawer-open # actually yes we can.
@@ -1018,8 +1029,6 @@ class OnPolicyAlgorithm(
                     f"dro/{task_name}_sample_weight": dist[i]
                     for i, task_name in enumerate(task_names)
                 }
-                for i, task_name in enumerate(task_names):
-                    dro_dist_metrics[f'dro/{task_name}_success_rate'] = mean_success_per_task[i]
 
                 task_step_counts = {task_name: 0 for task_name in task_names}
                 task_successes[:] = 0
@@ -1051,6 +1060,20 @@ class OnPolicyAlgorithm(
 
                 if track:
                     log(logs, step=total_steps)
+
+                # success rate should be zero for tasks we did not sample.
+                task_attempts[task_attempts == 0] = 1
+                mean_success_per_task = task_successes / task_attempts
+
+                train_metrics = {}
+                for i, task_name in enumerate(task_names):
+                    train_metrics[f'train/{task_name}_success_rate'] = mean_success_per_task[i]
+
+                task_successes[:] = 0
+                task_attempts[:] = 0
+
+                if track:
+                    log(train_metrics, step=total_steps)
 
                 # Evaluation
                 if (
