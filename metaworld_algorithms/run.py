@@ -55,7 +55,8 @@ class Run:
 
     dro: bool = False
     dro_learning_rate: float = 0.1
-    dro_eps: float = 0.05
+    dro_eps: float = 0.01
+    dro_min_prob: float | None = None
 
     def __post_init__(self) -> None:
         self._wandb_enabled = False
@@ -200,6 +201,7 @@ class Run:
             dro=self.dro,
             dro_learning_rate=self.dro_learning_rate,
             dro_eps=self.dro_eps,
+            dro_min_prob=self.dro_min_prob
         )
 
         # Cleanup

@@ -13,9 +13,9 @@ arguments = $(Process) $(Step) $(command) $(user_name)
 should_transfer_files = YES
 when_to_transfer_output = ON_EXIT
 
-request_cpus = 1
-request_memory = 20GB
-request_disk = 40GB
+request_cpus = 10
+request_memory = 15GB
+request_disk = 15GB
 
 # Extra GPU settings
 request_gpus            = 1
@@ -26,6 +26,6 @@ request_gpus            = 1
 +WantGlidein            = false
 +GPUJobLength           = "$(job_length)"
 
-requirements = (Target.HasCHTCStaging == true) && (Target.GPUs_DeviceName == "NVIDIA GeForce RTX 2080 Ti")
+requirements = (Target.HasCHTCStaging == true)
 
 queue $(num_jobs) command from $(commands_file)
