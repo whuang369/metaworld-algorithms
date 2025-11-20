@@ -59,9 +59,10 @@ def get_actor_config(
     return actor_config
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=False)
 class Args:
     seed: int = 1
+    seed_offset: int = 0
     resume: bool = False
     data_dir: Path = Path("./run_results")
 
@@ -84,6 +85,7 @@ class Args:
 
 def main() -> None:
     args = tyro.cli(Args)
+    args.seed += args.seed_offset
 
     run = Run(
         run_name="mt10_ppo_lfb",

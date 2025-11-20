@@ -848,12 +848,14 @@ class OnPolicyAlgorithm(
         global_episodic_return: Deque[float] = deque([], maxlen=20 * self.num_tasks)
         global_episodic_length: Deque[int] = deque([], maxlen=20 * self.num_tasks)
         # global_episodic_return: Deque[float] = deque([], maxlen=20 * self.num_tasks)
-        dro_task_successes = np.zeros(self.num_tasks)
+        task_success_any_step = np.zeros(self.num_tasks)
+        task_attempts = np.zeros(self.num_tasks)
+
+        dro_task_success_any_step = np.zeros(self.num_tasks)
         dro_task_attempts = np.zeros(self.num_tasks)
         dro_task_counts = np.zeros(self.num_tasks)
 
-        task_successes = np.zeros(self.num_tasks)
-        task_attempts = np.zeros(self.num_tasks)
+        task_success_already_found = np.zeros(self.num_tasks)
 
         obs, _ = envs.reset()
 
@@ -909,6 +911,29 @@ class OnPolicyAlgorithm(
             episode_started = np.logical_or(terminations, truncations)
             obs = next_obs
 
+            # Meta-World does not terminate on success during training, 
+            # so we need to check *every* transition for success, not just the last one.
+            for i in range(self.num_tasks):
+                if task_success_already_found[i] == 1:
+                    continue
+
+                if episode_started[i]:
+                    # obs_ = infos["final_obs"] # episode ended, so fetch the actual final_obs
+                    task_id = np.argmax(infos["final_obs"][i][-self.num_tasks:])
+                    is_success = infos["final_info"]["success"][i]
+                else:
+                    # obs_ = obs # episode not ended, so we can just use obs
+                    task_id = np.argmax(obs[i][-self.num_tasks:])
+                    is_success = infos["success"][i]
+
+                task_success_any_step[task_id] += is_success
+
+                dro_task_success_any_step[task_id] += is_success
+
+                if is_success:
+                    task_success_already_found[i] = 1
+
+
             for i, env_ended in enumerate(episode_started):
                 if env_ended:
                     global_episodic_return.append(
@@ -917,16 +942,14 @@ class OnPolicyAlgorithm(
                     global_episodic_length.append(
                         infos["final_info"]["episode"]["l"][i]
                     )
-                    # print(infos["final_obs"][i][-self.num_tasks:])
-                    task_id = np.argmax(infos["final_obs"][i][-self.num_tasks:])
-                    task_successes[task_id] += infos["final_info"]["success"][i]
-                    task_attempts[task_id] += 1
-
-                    dro_task_successes[task_id] += infos["final_info"]["success"][i]
-                    dro_task_attempts[task_id] += 1
-                    dro_task_counts[task_id] += 1
-
                     episodes_ended += 1
+
+                    task_id = np.argmax(infos["final_obs"][i][-self.num_tasks:])
+                    task_attempts[task_id] += 1
+                    dro_task_attempts[task_id] += 1
+
+                    # end of episode, so reset our search for a success in the next trajectory
+                    task_success_already_found[i] = 0
 
             if global_step % 500 == 0 and global_episodic_return:
                 print(
@@ -947,24 +970,20 @@ class OnPolicyAlgorithm(
                     )
 
             if dro and (global_step+1) % dro_num_steps == 0:
-                print("\n" + "=" * 60)
-                print("Task Activity Statistics:")
-                print("=" * 60)
-
                 # success rate should be zero for tasks we did not sample.
                 dro_task_attempts[dro_task_attempts == 0] = 1
-                dro_mean_success_per_task = dro_task_successes / dro_task_attempts
+                dro_mean_success_per_task = dro_task_success_any_step / dro_task_attempts
 
                 dro_task_frac = np.zeros(self.num_tasks)
                 dro_total_count = sum(dro_task_counts)
 
-                print(f"{'Task Name':<30} {'Success Rate':>12} {'Task Weight':>12} {'Frac Sampled':>12} ")
-                print("-" * 60)
-                for i in range(self.num_tasks):
-                    frac = (dro_task_counts[i] / dro_total_count * 100) if dro_total_count > 0 else 0
-                    print(f"{task_names[i]:<30} {dro_mean_success_per_task[i]:>10.3f} {dist[i]:>10.3f} {frac:>10.3f}")
-                    dro_task_frac[i] = frac
-                print("=" * 60)
+                # print(f"{'Task Name':<30} {'Success Rate':>12} {'Task Weight':>12} {'Frac Sampled':>12} ")
+                # print("-" * 60)
+                # for i in range(self.num_tasks):
+                #     frac = (dro_task_counts[i] / dro_total_count) if dro_total_count > 0 else 0
+                #     print(f"{task_names[i]:<30} {dro_mean_success_per_task[i]:>10.3f} {dist[i]:>10.3f} {frac:>10.3f}")
+                #     dro_task_frac[i] = frac
+                # print("=" * 60)
 
                 success_ref = np.ones(len(dro_mean_success_per_task))
                 dist = self.exponentiated_gradient_ascent_step(
@@ -985,10 +1004,9 @@ class OnPolicyAlgorithm(
                         dro_metrics[f"dro/{task_name}_weight"] = dist[i]
                         log(dro_metrics, step=total_steps)
 
-                dro_task_successes[:] = 0
+                dro_task_success_any_step[:] = 0
                 dro_task_attempts[:] = 0
                 dro_task_counts[:] = 0
-
 
             # Logging
             if global_step % 1_000 == 0:
@@ -1016,7 +1034,11 @@ class OnPolicyAlgorithm(
 
                 # success rate should be zero for tasks we did not sample.
                 task_attempts[task_attempts == 0] = 1
-                mean_success_per_task = task_successes / task_attempts
+                mean_success_per_task = task_success_any_step / task_attempts
+
+                print(f'{task_success_any_step=}')
+                print(f'{mean_success_per_task=}')
+                print(f'{task_attempts=}')
 
                 if track:
                     train_metrics = {}
@@ -1024,8 +1046,15 @@ class OnPolicyAlgorithm(
                         train_metrics[f'train/{task_name}_success_rate'] = mean_success_per_task[i]
                     log(train_metrics, step=total_steps)
 
-                task_successes[:] = 0
+                print(f"{'Task Name':<30} {'Success Rate':>12} {'Task Weight':>12}")
+                print("-" * 60)
+                for i in range(self.num_tasks):
+                    print(f"{task_names[i]:<30} {mean_success_per_task[i]:>10.3f} {dist[i]:>10.3f}")
+                print("=" * 60)
+
+                task_success_any_step[:] = 0
                 task_attempts[:] = 0
+
                 # Evaluation
                 if (
                     config.evaluation_frequency > 0
