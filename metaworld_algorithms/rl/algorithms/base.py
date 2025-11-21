@@ -848,9 +848,12 @@ class OnPolicyAlgorithm(
         global_episodic_return: Deque[float] = deque([], maxlen=20 * self.num_tasks)
         global_episodic_length: Deque[int] = deque([], maxlen=20 * self.num_tasks)
         # global_episodic_return: Deque[float] = deque([], maxlen=20 * self.num_tasks)
+
+        task_return_sum = np.zeros(self.num_tasks)
         task_success_any_step = np.zeros(self.num_tasks)
         task_attempts = np.zeros(self.num_tasks)
 
+        dro_task_return_sum = np.zeros(self.num_tasks)
         dro_task_success_any_step = np.zeros(self.num_tasks)
         dro_task_attempts = np.zeros(self.num_tasks)
         dro_task_counts = np.zeros(self.num_tasks)
@@ -872,6 +875,8 @@ class OnPolicyAlgorithm(
 
         if dro:
             dist = np.ones(self.num_tasks)/self.num_tasks
+            # dist[:] = 0
+            # dist[4] = 1
             self.set_task_distributions(envs, dist)
 
         episode_started = np.ones((envs.num_envs,))
@@ -947,6 +952,8 @@ class OnPolicyAlgorithm(
                     task_id = np.argmax(infos["final_obs"][i][-self.num_tasks:])
                     task_attempts[task_id] += 1
                     dro_task_attempts[task_id] += 1
+                    task_return_sum[task_id] += infos["final_info"]["episode"]["r"][i]
+                    dro_task_return_sum[task_id] += infos["final_info"]["episode"]["r"][i]
 
                     # end of episode, so reset our search for a success in the next trajectory
                     task_success_already_found[i] = 0
@@ -973,6 +980,7 @@ class OnPolicyAlgorithm(
                 # success rate should be zero for tasks we did not sample.
                 dro_task_attempts[dro_task_attempts == 0] = 1
                 dro_mean_success_per_task = dro_task_success_any_step / dro_task_attempts
+                dro_mean_return_per_task = dro_task_return_sum / dro_task_attempts
 
                 dro_task_frac = np.zeros(self.num_tasks)
                 dro_total_count = sum(dro_task_counts)
@@ -994,6 +1002,8 @@ class OnPolicyAlgorithm(
                     eps=dro_eps,
                     min_prob=dro_min_prob if dro_min_prob else 1/self.num_tasks * 1/10,
                 )
+                # dist[:] = 0
+                # dist[4] = 1
                 self.set_task_distributions(envs, dist)
 
                 if track:
@@ -1002,8 +1012,10 @@ class OnPolicyAlgorithm(
                         dro_metrics[f'dro/{task_name}_success_rate'] = dro_mean_success_per_task[i]
                         dro_metrics[f"dro/{task_name}_frac"] = dro_task_frac[i]
                         dro_metrics[f"dro/{task_name}_weight"] = dist[i]
+                        dro_metrics[f"dro/{task_name}_return"] = dro_mean_return_per_task[i]
                         log(dro_metrics, step=total_steps)
 
+                dro_task_return_sum[:] = 0
                 dro_task_success_any_step[:] = 0
                 dro_task_attempts[:] = 0
                 dro_task_counts[:] = 0
@@ -1035,6 +1047,7 @@ class OnPolicyAlgorithm(
                 # success rate should be zero for tasks we did not sample.
                 task_attempts[task_attempts == 0] = 1
                 mean_success_per_task = task_success_any_step / task_attempts
+                mean_return_per_task = task_return_sum / task_attempts
 
                 print(f'{task_success_any_step=}')
                 print(f'{mean_success_per_task=}')
@@ -1044,6 +1057,8 @@ class OnPolicyAlgorithm(
                     train_metrics = {}
                     for i, task_name in enumerate(task_names):
                         train_metrics[f'train/{task_name}_success_rate'] = mean_success_per_task[i]
+                        train_metrics[f'train/{task_name}_return'] = mean_return_per_task[i]
+
                     log(train_metrics, step=total_steps)
 
                 print(f"{'Task Name':<30} {'Success Rate':>12} {'Task Weight':>12}")
@@ -1052,6 +1067,7 @@ class OnPolicyAlgorithm(
                     print(f"{task_names[i]:<30} {mean_success_per_task[i]:>10.3f} {dist[i]:>10.3f}")
                 print("=" * 60)
 
+                task_return_sum[:] = 0
                 task_success_any_step[:] = 0
                 task_attempts[:] = 0
 
