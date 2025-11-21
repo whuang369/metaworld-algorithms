@@ -256,13 +256,54 @@ class PPO(OnPolicyAlgorithm[PPOConfig]):
     def eval_action(self, observations: Observation) -> Action:
         return jax.device_get(_eval_action(self.policy, observations))
 
+    def segment_mean(self, x, idx, num_segments):
+        # x: (N,), idx: (N,)
+        sums = jax.ops.segment_sum(x, idx, num_segments)
+        counts = jax.ops.segment_sum(jnp.ones_like(x), idx, num_segments)
+        return sums / (counts + 1e-8)
+
+    def segment_std(self, x, idx, num_segments):
+        means = self.segment_mean(x, idx, num_segments)
+        sq_means = self.segment_mean(x ** 2, idx, num_segments)
+        var = sq_means - means ** 2
+        return jnp.sqrt(jnp.maximum(var, 0.0)) + 1e-8
+
     def update_policy(self, data: Rollout) -> tuple[Self, LogDict]:
         assert data.advantages is not None
 
+        # if self.normalize_advantages:
+        #     advantages = (
+        #         data.advantages - data.advantages.mean(axis=0, keepdims=True)
+        #     ) / (data.advantages.std(axis=0, keepdims=True) + 1e-8)
+        # else:
+        #     advantages = data.advantages
+
+        # PER-TASK ADVANTAGE NORMALIZATION
+        # If returns are large for some tasks (easy tasks) but not others (hard tasks),
+        # then global normalization will make all hard task have negative advantage,
+        # which will dramatically slow learning on these tasks.
+
         if self.normalize_advantages:
-            advantages = (
-                data.advantages - data.advantages.mean(axis=0, keepdims=True)
-            ) / (data.advantages.std(axis=0, keepdims=True) + 1e-8)
+            # data.advantages: (N,1)
+            # data.observations: (N, obs_dim + num_tasks)
+            adv = data.advantages[:, 0]  # (N,)
+            obs = data.observations
+            num_tasks = self.num_tasks
+
+            # Extract per-sample task IDs (from appended one-hot)
+            task_ids = jnp.argmax(obs[:, -num_tasks:], axis=-1)  # (N,)
+
+            # Compute per-task means and stds
+            means = self.segment_mean(adv, task_ids, num_tasks)  # (num_tasks,)
+            stds = self.segment_std(adv, task_ids, num_tasks)  # (num_tasks,)
+
+            # Broadcast task-wise stats to per-sample vectors
+            adv_mean = means[task_ids]  # (N,)
+            adv_std = stds[task_ids]  # (N,)
+
+            # Normalize
+            advantages = ((adv - adv_mean) / adv_std).reshape(-1, 1)
+
         else:
             advantages = data.advantages
 
