@@ -8,6 +8,7 @@ import numpy as np
 import numpy.typing as npt
 import orbax.checkpoint as ocp
 from flax import struct
+from flax.training.train_state import TrainState
 from jaxtyping import Float
 
 from metaworld_algorithms.checkpoint import get_checkpoint_save_args
@@ -83,9 +84,11 @@ class Algorithm(
         checkpoint_metadata: CheckpointMetadata | None = None,
         buffer_checkpoint: ReplayBufferCheckpoint | None = None,
         eval_env: GymVectorEnv = None,
+        reset_optimizer_steps: int = 100_000,
         dro: bool = False,
         dro_learning_rate: float = 0.1,
         dro_eps: float = 0.05,
+        dro_min_prob: float = 0.05,
     ) -> Self: ...
 
 
@@ -827,6 +830,20 @@ class OnPolicyAlgorithm(
             # The call() method will find set_task_distribution on MultiTaskDROWrapper in the wrapper chain
             envs.call('set_task_distribution', distribution)
 
+    def reset_policy_optimizer(self):
+        if hasattr(self, "policy") and isinstance(self.policy, TrainState):
+            new_opt_state = self.policy.tx.init(self.policy.params)
+            new_policy = self.policy.replace(opt_state=new_opt_state, step=0)
+            return self.replace(policy=new_policy)
+        return self
+
+    def reset_value_optimizer(self):
+        if hasattr(self, "value_function") and isinstance(self.value_function, TrainState):
+            new_opt_state = self.value_function.tx.init(self.value_function.params)
+            new_vf = self.value_function.replace(opt_state=new_opt_state, step=0)
+            return self.replace(value_function=new_vf)
+        return self
+
     @override
     def train(
         self,
@@ -840,6 +857,7 @@ class OnPolicyAlgorithm(
         checkpoint_metadata: CheckpointMetadata | None = None,
         buffer_checkpoint: ReplayBufferCheckpoint | None = None,
         eval_env: GymVectorEnv = None,
+        reset_optimizer_steps: int = 100_000,
         dro: bool = False,
         dro_learning_rate: float = 0.1,
         dro_eps: float = 0.05,
@@ -1020,8 +1038,16 @@ class OnPolicyAlgorithm(
                 dro_task_attempts[:] = 0
                 dro_task_counts[:] = 0
 
+            # if reset_optimizer_steps > 0 and global_step % reset_optimizer_steps == 0 and global_step > 0:
+            #     print('BEFORE RESET')
+            #     print("First moment (mu):", self.policy.opt_state)
+            #     self.reset_policy_optimizer()
+            #     self.reset_value_optimizer()
+            #     print('AFTER RESET')
+            #     print("Second moment (nu):", self.policy.opt_state[0])
+
             # Logging
-            if global_step % 1_000 == 0:
+            if global_step % 10_000 == 0:
                 sps_steps = (global_step - start_step) * envs.num_envs
                 sps = int(sps_steps / (time.time() - start_time))
                 print("SPS:", sps)

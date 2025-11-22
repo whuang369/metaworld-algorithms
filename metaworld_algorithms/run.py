@@ -47,11 +47,12 @@ class Run:
     training_config: TrainingConfig
 
     checkpoint: bool = True
-    max_checkpoints_to_keep: int = 5
+    max_checkpoints_to_keep: int = 0
     best_checkpoint_metric: str = "mean_success_rate"
     resume: bool = False
 
     eval_env: EnvConfig = None
+    reset_optimizer_steps: int = 100_000
 
     dro: bool = False
     dro_learning_rate: float = 0.1
@@ -198,6 +199,7 @@ class Run:
             checkpoint_metadata=checkpoint_metadata,
             buffer_checkpoint=buffer_checkpoint,
             eval_env=eval_envs,
+            reset_optimizer_steps=self.reset_optimizer_steps,
             dro=self.dro,
             dro_learning_rate=self.dro_learning_rate,
             dro_eps=self.dro_eps,
