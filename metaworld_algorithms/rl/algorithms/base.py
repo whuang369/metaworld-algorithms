@@ -1121,7 +1121,7 @@ class OnPolicyAlgorithm(
                             )
 
                         # Reset envs again to exit eval mode
-                        obs, _ = envs.reset()
+                        _, _ = envs.reset()
                         episode_started = np.ones((envs.num_envs,))
                     else:
                         mean_success_rate, mean_returns, mean_success_per_task = (
