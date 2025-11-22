@@ -15,6 +15,7 @@ tar --exclude="chtc" \
     --exclude="metaworld/metaworld.egg-info" \
     --exclude="metaworld/docs" \
     --exclude="run_results" \
+    --exclude="gymnasium-robotics" \
     -czvf ${f}.tar.gz $f
 
 scp ${f}.tar.gz whuang369@ap2001.chtc.wisc.edu:/staging/whuang369
