@@ -133,7 +133,7 @@ class Args:
     total_steps: int = int(10e7)
     evaluation_frequency: int = 2_000_000 // 500
 
-    learning_rate: float = 1e-3
+    learning_rate: float = 3e-4
     num_epochs: int = 8
     num_gradient_steps: int = 32
     rollout_steps: int = 10_000
@@ -184,6 +184,7 @@ def main() -> None:
             num_gradient_steps=32,
             gae_lambda=0.97,
             target_kl=0.05,
+            entropy_coefficient=1e-2,
             clip_vf_loss=False,
             reset_optimizer_steps=args.reset_optimizer_steps,
             normalize_advantages=args.normalize_advantages,
