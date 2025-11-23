@@ -23,6 +23,7 @@ class Args:
     wandb_entity: str | None = None
     data_dir: Path = Path("./run_results")
     resume: bool = False
+    wandb_group: str | None = None
 
 
 def main() -> None:
@@ -71,6 +72,7 @@ def main() -> None:
             entity=args.wandb_entity,
             config=run,
             resume="allow",
+            group=args.wandb_group,
         )
 
     run.start()

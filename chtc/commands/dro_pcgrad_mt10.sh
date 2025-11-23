@@ -1,0 +1,1 @@
+python examples/multi_task/pcgrad_mt10.py --track --wandb_entity whuang369-university-of-wisconsin-madison --wandb_project metaworld --wandb_group baseline/a100/pcgrad_mt10
