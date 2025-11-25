@@ -16,6 +16,7 @@ tar --exclude="chtc" \
     --exclude="metaworld/docs" \
     --exclude="run_results" \
     --exclude="gymnasium-robotics" \
+    --exclude="local" \
     -czvf ${f}.tar.gz $f
 
 scp ${f}.tar.gz whuang369@ap2001.chtc.wisc.edu:/staging/whuang369

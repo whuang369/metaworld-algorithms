@@ -12,8 +12,7 @@ source $HOME/.local/bin/env
 uv venv .venv --python 3.12
 source .venv/bin/activate
 uv pip install -e ".[cuda12]"
-uv pip install -e ./metaworld
-uv pip install -e ./custom-envs
+uv pip install -e ./metaworld ./custom-envs
 uv pip install packaging
 
 git clone https://github.com/Farama-Foundation/gymnasium-robotics.git

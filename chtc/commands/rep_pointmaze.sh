@@ -1,0 +1,1 @@
+python dro_examples/pointmaze/ppo_pointmaze.py --track --wandb_entity whuang369-university-of-wisconsin-madison --wandb_project pointmaze --wandb_group baseline/dro_pointmaze/lr=0.1
