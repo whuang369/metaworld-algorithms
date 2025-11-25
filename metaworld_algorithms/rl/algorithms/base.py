@@ -811,7 +811,7 @@ class OnPolicyAlgorithm(
 
         if isinstance(envs, gym.vector.SyncVectorEnv):
             # SyncVectorEnv has envs attribute
-            for env_idx in range(len(distribution)):
+            for env_idx in range(len(envs.envs)):
                 env = envs.envs[env_idx]
                 # Navigate through wrappers to find or MultiTaskDROWrapper
                 current = env
