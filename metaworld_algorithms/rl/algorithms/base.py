@@ -861,16 +861,26 @@ class OnPolicyAlgorithm(
 
         # metaworld_cls_to_task_name = {v.__name__: k for k, v in MT10_V3.items()}
         # task_names = [metaworld_cls_to_task_name[task_name] for task_name in envs.get_attr("task_name")]
-        if self.num_tasks == 10:
-            task_names = list(MT10_V3.keys())
-        elif self.num_tasks == 25:
-            task_names = list(MT25_V3.keys())
-        elif self.num_tasks == 50:
-            task_names = list(MT50_V3.keys())
-        else:
-            raise NotImplementedError
+
+        # env_list = envs.get_attr("env")
+        # for env in env_list:
+        #     print(env.tasks)
+        # exit()
 
         if dro:
+            if self.num_tasks == 10:
+                task_names = list(MT10_V3.keys())
+            elif self.num_tasks == 25:
+                task_names = list(MT25_V3.keys())
+            elif self.num_tasks == 50:
+                task_names = list(MT50_V3.keys())
+            elif self.num_tasks == 4:
+                task_names = list(['PointMaze1', 'PointMaze2', 'PointMaze3', 'PointMaze4'])
+            elif self.num_tasks == 3:
+                task_names = list(['PointMaze/UMaze', 'PointMaze/Medium', 'PointMaze/Large'])
+            else:
+                raise NotImplementedError
+
             dist = np.ones(self.num_tasks)/self.num_tasks
             self.set_task_distributions(envs, dist)
 
@@ -1032,28 +1042,29 @@ class OnPolicyAlgorithm(
                 if track:
                     log(logs, step=total_steps)
 
-                # success rate should be zero for tasks we did not sample.
-                task_attempts[task_attempts == 0] = 1
-                mean_success_per_task = task_success_any_step / task_attempts
+                if dro:
+                    # success rate should be zero for tasks we did not sample.
+                    task_attempts[task_attempts == 0] = 1
+                    mean_success_per_task = task_success_any_step / task_attempts
 
-                print(f'{task_success_any_step=}')
-                print(f'{mean_success_per_task=}')
-                print(f'{task_attempts=}')
+                    print(f'{task_success_any_step=}')
+                    print(f'{mean_success_per_task=}')
+                    print(f'{task_attempts=}')
 
-                if track:
-                    train_metrics = {}
-                    for i, task_name in enumerate(task_names):
-                        train_metrics[f'train/{task_name}_success_rate'] = mean_success_per_task[i]
-                    log(train_metrics, step=total_steps)
+                    if track:
+                        train_metrics = {}
+                        for i, task_name in enumerate(task_names):
+                            train_metrics[f'train/{task_name}_success_rate'] = mean_success_per_task[i]
+                        log(train_metrics, step=total_steps)
 
-                print(f"{'Task Name':<30} {'Success Rate':>12} {'Task Weight':>12}")
-                print("-" * 60)
-                for i in range(self.num_tasks):
-                    print(f"{task_names[i]:<30} {mean_success_per_task[i]:>10.3f} {dist[i]:>10.3f}")
-                print("=" * 60)
+                    print(f"{'Task Name':<30} {'Success Rate':>12} {'Task Weight':>12}")
+                    print("-" * 60)
+                    for i in range(self.num_tasks):
+                        print(f"{task_names[i]:<30} {mean_success_per_task[i]:>10.3f} {dist[i]:>10.3f}")
+                    print("=" * 60)
 
-                task_success_any_step[:] = 0
-                task_attempts[:] = 0
+                    task_success_any_step[:] = 0
+                    task_attempts[:] = 0
 
                 # Evaluation
                 if (
