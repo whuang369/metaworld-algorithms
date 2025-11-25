@@ -27,6 +27,11 @@ class Args:
     data_dir: Path = Path("./run_results")
     resume: bool = False
 
+    dro_learning_rate: float = 0.3
+    dro_eps: float = 0.01
+    dro_min_prob: float = 0.01
+    rollout_steps: int = 10_000
+
 
 def main() -> None:
     args = tyro.cli(Args)
@@ -57,6 +62,7 @@ def main() -> None:
             target_kl=None,
             clip_vf_loss=False,
             normalize_advantages=False,
+            dro_upd_num_steps=args.rollout_steps,
         ),
         training_config=OnPolicyTrainingConfig(
             total_steps=int(2e7),
@@ -65,6 +71,10 @@ def main() -> None:
         ),
         checkpoint=True,
         resume=args.resume,
+        dro=True,
+        dro_learning_rate=args.dro_learning_rate,
+        dro_eps=args.dro_eps,
+        dro_min_prob=args.dro_min_prob,
     )
 
     if args.track:

@@ -882,16 +882,26 @@ class OnPolicyAlgorithm(
 
         # metaworld_cls_to_task_name = {v.__name__: k for k, v in MT10_V3.items()}
         # task_names = [metaworld_cls_to_task_name[task_name] for task_name in envs.get_attr("task_name")]
-        if self.num_tasks == 10:
-            task_names = list(MT10_V3.keys())
-        elif self.num_tasks == 25:
-            task_names = list(MT25_V3.keys())
-        elif self.num_tasks == 50:
-            task_names = list(MT50_V3.keys())
-        else:
-            raise NotImplementedError
+
+        # env_list = envs.get_attr("env")
+        # for env in env_list:
+        #     print(env.tasks)
+        # exit()
 
         if dro:
+            if self.num_tasks == 10:
+                task_names = list(MT10_V3.keys())
+            elif self.num_tasks == 25:
+                task_names = list(MT25_V3.keys())
+            elif self.num_tasks == 50:
+                task_names = list(MT50_V3.keys())
+            elif self.num_tasks == 4:
+                task_names = list(['PointMaze1', 'PointMaze2', 'PointMaze3', 'PointMaze4'])
+            elif self.num_tasks == 3:
+                task_names = list(['PointMaze/UMaze', 'PointMaze/Medium', 'PointMaze/Large'])
+            else:
+                raise NotImplementedError
+
             dist = np.ones(self.num_tasks)/self.num_tasks
             # dist[:] = 0
             # dist[4] = 1

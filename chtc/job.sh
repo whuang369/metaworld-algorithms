@@ -13,11 +13,11 @@ uv venv .venv --python 3.12
 source .venv/bin/activate
 uv pip install -e ".[cuda12]"
 uv pip install -e ./metaworld
-uv pip install -e ./metaworld/custom-envs
+uv pip install -e ./custom-envs
 uv pip install packaging
 
 git clone https://github.com/Farama-Foundation/gymnasium-robotics.git
-uv pip install -e gymnasium_robotics
+uv pip install -e ./gymnasium-robotics
 
 wandb login d0dbec0b8f79cdb57ef36ae46bb16a336954b2ca
 

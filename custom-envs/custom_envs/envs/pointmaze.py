@@ -5,11 +5,14 @@ import numpy as np
 
 def get_obs_info(obs, infos, task_id):
     next_obs = [obs['observation'][i] for i in range(4)] + [obs['achieved_goal'][i] for i in range(2)] + [obs['desired_goal'][i] for i in range(2)] + task_id
-    infos = {'is_success': infos['success'], 'success': infos['success']}
+    next_obs = np.array(next_obs, dtype=np.float64)
+    info_dict = {
+        'is_success': infos['success'],
+        'success': infos['success'],
+        # 'final_obs': next_obs.copy(),
+    }
 
-    next_obs = np.array(next_obs)
-
-    return next_obs, infos
+    return next_obs, info_dict
 
 def get_obs(obs, task_id):
     next_obs = [obs['observation'][i] for i in range(4)] + [obs['achieved_goal'][i] for i in range(2)] + [obs['desired_goal'][i] for i in range(2)] + task_id
@@ -61,8 +64,6 @@ class PointMazeEnv1(gym.Env):
 
         obs, reward, terminations, truncations, infos = self.env.step(a)
         next_obs, infos = get_obs_info(obs, infos, self.task_id)
-        if infos.get("success", False):
-            terminations = True
 
         return next_obs, reward, terminations, truncations, infos
 
@@ -98,8 +99,6 @@ class PointMazeEnv2(gym.Env):
 
         obs, reward, terminations, truncations, infos = self.env.step(a)
         next_obs, infos = get_obs_info(obs, infos, self.task_id)
-        if infos.get("success", False):
-            terminations = True
 
         return next_obs, reward, terminations, truncations, infos
 
@@ -135,8 +134,6 @@ class PointMazeEnv3(gym.Env):
 
         obs, reward, terminations, truncations, infos = self.env.step(a)
         next_obs, infos = get_obs_info(obs, infos, self.task_id)
-        if infos.get("success", False):
-            terminations = True
 
         return next_obs, reward, terminations, truncations, infos
 
@@ -172,8 +169,104 @@ class PointMazeEnv4(gym.Env):
 
         obs, reward, terminations, truncations, infos = self.env.step(a)
         next_obs, infos = get_obs_info(obs, infos, self.task_id)
-        if infos.get("success", False):
-            terminations = True
+
+        return next_obs, reward, terminations, truncations, infos
+
+    def reset(
+        self,
+        *,
+        seed: Optional[int] = None,
+        options: Optional[dict] = None,
+    ):
+
+        obs, _ = self.env.reset()
+        next_obs = get_obs(obs, self.task_id)
+
+        return next_obs, {}
+
+m = 3
+
+class UMazeEnv(gym.Env):
+    def __init__(self):
+        self.env = gym.make('PointMaze_UMaze-v3')
+        self.action_space = self.env.action_space
+        self.observation_space = gym.spaces.Box(np.array([-np.inf for _ in range(8)] + [0 for _ in range(m)]),
+                                                np.array([np.inf for _ in range(8)] + [1 for _ in range(m)]),
+                                                (m+8,),
+                                                np.float64)
+        self.task_id = [0 for _ in range(m)]
+        self.task_id[0] = 1
+
+        super().__init__()
+
+    def step(self, a):
+
+        obs, reward, terminations, truncations, infos = self.env.step(a)
+        next_obs, infos = get_obs_info(obs, infos, self.task_id)
+
+        return next_obs, reward, terminations, truncations, infos
+
+    def reset(
+        self,
+        *,
+        seed: Optional[int] = None,
+        options: Optional[dict] = None,
+    ):
+
+        obs, _ = self.env.reset()
+        next_obs = get_obs(obs, self.task_id)
+
+        return next_obs, {}
+
+class MediumEnv(gym.Env):
+    def __init__(self):
+        self.env = gym.make('PointMaze_Medium-v3')
+        self.action_space = self.env.action_space
+        self.observation_space = gym.spaces.Box(np.array([-np.inf for _ in range(8)] + [0 for _ in range(m)]),
+                                                np.array([np.inf for _ in range(8)] + [1 for _ in range(m)]),
+                                                (m+8,),
+                                                np.float64)
+        self.task_id = [0 for _ in range(m)]
+        self.task_id[1] = 1
+
+        super().__init__()
+
+    def step(self, a):
+
+        obs, reward, terminations, truncations, infos = self.env.step(a)
+        next_obs, infos = get_obs_info(obs, infos, self.task_id)
+
+        return next_obs, reward, terminations, truncations, infos
+
+    def reset(
+        self,
+        *,
+        seed: Optional[int] = None,
+        options: Optional[dict] = None,
+    ):
+
+        obs, _ = self.env.reset()
+        next_obs = get_obs(obs, self.task_id)
+
+        return next_obs, {}
+
+class LargeEnv(gym.Env):
+    def __init__(self):
+        self.env = gym.make('PointMaze_Large-v3')
+        self.action_space = self.env.action_space
+        self.observation_space = gym.spaces.Box(np.array([-np.inf for _ in range(8)] + [0 for _ in range(m)]),
+                                                np.array([np.inf for _ in range(8)] + [1 for _ in range(m)]),
+                                                (m+8,),
+                                                np.float64)
+        self.task_id = [0 for _ in range(m)]
+        self.task_id[2] = 1
+
+        super().__init__()
+
+    def step(self, a):
+
+        obs, reward, terminations, truncations, infos = self.env.step(a)
+        next_obs, infos = get_obs_info(obs, infos, self.task_id)
 
         return next_obs, reward, terminations, truncations, infos
 

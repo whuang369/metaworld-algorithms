@@ -9,4 +9,7 @@ __all__ = [
     "PointMazeEnv2",
     "PointMazeEnv3",
     "PointMazeEnv4",
+    "UMaze",
+    "Medium",
+    "Large",
 ]
