@@ -26,6 +26,6 @@ request_gpus            = 1
 +WantGlidein            = false
 +GPUJobLength           = "$(job_length)"
 
-requirements = (Target.HasCHTCStaging == true)
+requirements = (Target.HasCHTCStaging == true) && (Target.CUDADriverVersion >= 12.1) && (Target.GPUs_GlobalMemoryMb < 20000)
 
 queue $(num_jobs) command from $(commands_file)

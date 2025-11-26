@@ -24,7 +24,7 @@ class PointMazeConfig(EnvConfig):
     normalize_observations: bool = False
     reward_alpha: float = 0.001
     render_mode: str | None = None
-    num_tasks: int = 4
+    num_tasks: int = 3
 
     @cached_property
     @override

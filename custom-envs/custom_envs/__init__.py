@@ -69,81 +69,142 @@ register(
     max_episode_steps=400,
 )
 
-def make_custom_pointmaze_envs(
+def _init_pointmaze_task_env(
+    env_name: str,
+    *,
+    seed: int | None = None,
+    terminate_on_success: bool = False,
+    use_one_hot: bool = False,
+    env_id: int | None = None,
+    num_tasks: int | None = None,
+    recurrent_info_in_obs: bool = False,
+    normalize_reward_in_recurrent_info: bool = True,
+    reward_normalization_method: Literal["gymnasium", "exponential"] | None = None,
+    normalize_observations: bool = False,
+    reward_alpha: float = 0.001,
+    flatten_observations: bool = False,
+    render_mode: Literal["human", "rgb_array", "depth_array"] | None = None,
+):
+    """Create a single PointMaze env wrapped like Meta-World tasks."""
+    env = PointMazeTaskEnv(env_name, render_mode=render_mode)
+    # if seed is not None:
+    #     env.seed(seed)  # type: ignore
+    env = gym.wrappers.TimeLimit(env, getattr(env, "max_episode_steps", 200))  # type: ignore
+    env = AutoTerminateOnSuccessWrapper(env)
+    env.toggle_terminate_on_success(terminate_on_success)
+    if use_one_hot:
+        assert env_id is not None, "Need to pass env_id through constructor"
+        assert num_tasks is not None, "Need to pass num_tasks through constructor"
+        env = OneHotWrapper(env, env_id, num_tasks)
+    if recurrent_info_in_obs:
+        env = RNNBasedMetaRLWrapper(
+            env, normalize_reward=normalize_reward_in_recurrent_info
+        )
+    if reward_normalization_method == "gymnasium":
+        env = gym.wrappers.NormalizeReward(env)
+    elif reward_normalization_method == "exponential":
+        env = NormalizeRewardsExponential(reward_alpha=reward_alpha, env=env)
+    if normalize_observations:
+        env = gym.wrappers.NormalizeObservation(env)
+    env = gym.wrappers.RecordEpisodeStatistics(env)
+    if seed is not None:
+        env.action_space.seed(seed)
+    return env
+
+
+def make_eval_pointmaze_envs(
     seed: int | None = None,
     vector_strategy: Literal["sync", "async"] = "async",
     autoreset_mode: gym.vector.AutoresetMode | str = gym.vector.AutoresetMode.SAME_STEP,
-    use_one_hot: bool = False,
     terminate_on_success: bool = False,
+    use_one_hot: bool = False,
     recurrent_info_in_obs: bool = False,
     normalize_reward_in_recurrent_info: bool = True,
     reward_normalization_method: Literal["gymnasium", "exponential"] | None = None,
     normalize_observations: bool = False,
     reward_alpha: float = 0.001,
     render_mode: Literal["human", "rgb_array", "depth_array"] | None = None,
-    **kwargs,
+    flatten_observations: bool = True,
 ) -> gym.vector.VectorEnv:
     """
-    Create a vectorized EasyGridWorld environment containing:
-        EasyGridWorldEnv1–4.
-    Mirrors Meta-World's make_mt_envs but all logic is inline.
-    """
-    # Map each environment ID to its constructor
-    env_classes = {
-        "PointMaze1": lambda: gym.make("PointMaze1"),
-        "PointMaze2": lambda: gym.make("PointMaze2"),
-        "PointMaze3": lambda: gym.make("PointMaze3"),
-        "PointMaze4": lambda: gym.make("PointMaze4"),
-    }
+    Create a DRO-ready PointMaze vector env with MultiTaskDROWrapper.
 
+    Each async worker wraps the PointMaze Open/Medium/Large tasks and can
+    rebalance sampling probability via MultiTaskDROWrapper.
+    """
     vectorizer: type[gym.vector.VectorEnv] = getattr(
         gym.vector, f"{vector_strategy.capitalize()}VectorEnv"
     )
-    num_tasks = len(env_classes)
-
-    # --- Inline environment factory for each sub-env ---
-    def make_single_env(env_fn, env_id: int):
-        env = env_fn()
-
-        if seed is not None:
-            env.reset(seed=seed + env_id)
-
-        # Meta-World–style wrappers
-        env = gym.wrappers.TimeLimit(env, getattr(env, "max_episode_steps", 200))
-        env = AutoTerminateOnSuccessWrapper(env)
-        env.toggle_terminate_on_success(terminate_on_success)
-
-        if use_one_hot:
-            env = OneHotWrapper(env, env_id, num_tasks)
-
-        if recurrent_info_in_obs:
-            env = RNNBasedMetaRLWrapper(env, normalize_reward=normalize_reward_in_recurrent_info)
-
-        if reward_normalization_method == "gymnasium":
-            env = gym.wrappers.NormalizeReward(env)
-        elif reward_normalization_method == "exponential":
-            env = NormalizeRewardsExponential(reward_alpha=reward_alpha, env=env)
-
-        if normalize_observations:
-            env = gym.wrappers.NormalizeObservation(env)
-
-        env = gym.wrappers.RecordEpisodeStatistics(env)
-        # env = CheckpointWrapper(env, f"EasyGridWorldEnv{env_id+1}")
-
-        if seed is not None:
-            env.action_space.seed(seed + env_id)
-
-        return env
-
-    # --- Build env constructors for AsyncVectorEnv/SyncVectorEnv ---
-    env_fns = [
-        partial(make_single_env, env_fn=env_fn, env_id=env_id)
-        for env_id, env_fn in enumerate(env_classes.values())
+    all_tasks = [
+        [
+            _encode_pointmaze_task(env_name, env_idx)
+            for env_name in POINTMAZE_DRO_VARIANTS.keys()
+        ]
+        for env_idx in range(POINTMAZE_DRO_NUM_ENVS)
     ]
 
-    return vectorizer(env_fns, autoreset_mode=autoreset_mode)
+    env_tasks = [
+        [
+            all_tasks[env_idx][env_idx]
+        ]
+        for env_idx in range(POINTMAZE_DRO_NUM_ENVS)
+    ]
 
-def _custom_pointmaze_vector_entry_point(
+
+    def _build_pointmaze_env(
+        env_cls: str,
+        tasks: list[Task],
+        env_id: int | None = None,
+        num_tasks: int | None = None,
+    ) -> gym.Env:
+        del tasks  # Tasks do not customize the PointMaze variants yet.
+        worker_seed = (
+            seed + env_id if seed is not None and env_id is not None else seed
+        )
+        return _init_pointmaze_task_env(
+            env_name=env_cls,
+            seed=worker_seed,
+            terminate_on_success=terminate_on_success,
+            use_one_hot=use_one_hot,
+            env_id=env_id,
+            num_tasks=num_tasks,
+            recurrent_info_in_obs=recurrent_info_in_obs,
+            normalize_reward_in_recurrent_info=normalize_reward_in_recurrent_info,
+            reward_normalization_method=reward_normalization_method,
+            normalize_observations=normalize_observations,
+            reward_alpha=reward_alpha,
+            flatten_observations=flatten_observations,
+            render_mode=render_mode,
+        )
+
+    def _make_env_internal(i: int) -> gym.Env:
+        first_env_name = list(POINTMAZE_DRO_VARIANTS.keys())[i]
+        first_env_cls = POINTMAZE_DRO_VARIANTS[first_env_name]
+        first_tasks = [task for task in env_tasks[i] if task.env_name == first_env_name]
+        train_classes = {first_env_name: first_env_cls}
+        env = _build_pointmaze_env(
+            env_cls=first_env_cls,
+            tasks=first_tasks,
+            env_id=i,
+            num_tasks=len(POINTMAZE_DRO_VARIANTS),
+        )
+        env = MultiTaskDROWrapper(
+            env,
+            env_tasks[i],
+            train_classes,
+            include_task_one_hot=use_one_hot,
+            env_factory=_build_pointmaze_env,
+            env_id=i,
+        )
+        env = CheckpointWrapper(env, f"EVAL_PointMaze_{i}")
+        return env
+
+    return vectorizer(
+        [partial(_make_env_internal, i=i) for i in range(POINTMAZE_DRO_NUM_ENVS)],
+        autoreset_mode=autoreset_mode,
+    )
+
+def _eval_pointmaze_vector_entry_point(
         vector_strategy: str = "async",
         autoreset_mode: gym.vector.AutoresetMode | str = gym.vector.AutoresetMode.SAME_STEP,
         seed: int | None = None,
@@ -151,9 +212,8 @@ def _custom_pointmaze_vector_entry_point(
         num_envs: int | None = None,
         **kwargs,
 ):
-    # This mirrors _dro_mt_bench_vector_entry_point in Meta-World
-
-    return make_custom_pointmaze_envs(
+    del num_envs  # Gymnasium passes this when vectorizing; fixed worker count here.
+    return make_eval_pointmaze_envs(
         seed=seed,
         vector_strategy=vector_strategy,
         autoreset_mode=autoreset_mode,
@@ -162,13 +222,13 @@ def _custom_pointmaze_vector_entry_point(
     )
 
 register(
-    id="Pointmaze/custom_pointmaze",
+    id="Pointmaze/eval_pointmaze",
     vector_entry_point=lambda vector_strategy="async",
                               autoreset_mode=gym.vector.AutoresetMode.SAME_STEP,
                               seed=None,
                               use_one_hot=False,
                               num_envs=None,
-                              **kwargs: _custom_pointmaze_vector_entry_point(
+                              **kwargs: _eval_pointmaze_vector_entry_point(
         vector_strategy=vector_strategy,
         autoreset_mode=autoreset_mode,
         seed=seed,
@@ -238,49 +298,6 @@ class PointMazeTaskEnv(gym.Env):
 
     def close(self):
         self._env.close()
-
-
-def _init_pointmaze_task_env(
-    env_name: str,
-    *,
-    seed: int | None = None,
-    terminate_on_success: bool = False,
-    use_one_hot: bool = False,
-    env_id: int | None = None,
-    num_tasks: int | None = None,
-    recurrent_info_in_obs: bool = False,
-    normalize_reward_in_recurrent_info: bool = True,
-    reward_normalization_method: Literal["gymnasium", "exponential"] | None = None,
-    normalize_observations: bool = False,
-    reward_alpha: float = 0.001,
-    flatten_observations: bool = False,
-    render_mode: Literal["human", "rgb_array", "depth_array"] | None = None,
-):
-    """Create a single PointMaze env wrapped like Meta-World tasks."""
-    env = PointMazeTaskEnv(env_name, render_mode=render_mode)
-    # if seed is not None:
-    #     env.seed(seed)  # type: ignore
-    env = gym.wrappers.TimeLimit(env, getattr(env, "max_episode_steps", 200))  # type: ignore
-    env = AutoTerminateOnSuccessWrapper(env)
-    env.toggle_terminate_on_success(terminate_on_success)
-    if use_one_hot:
-        assert env_id is not None, "Need to pass env_id through constructor"
-        assert num_tasks is not None, "Need to pass num_tasks through constructor"
-        env = OneHotWrapper(env, env_id, num_tasks)
-    if recurrent_info_in_obs:
-        env = RNNBasedMetaRLWrapper(
-            env, normalize_reward=normalize_reward_in_recurrent_info
-        )
-    if reward_normalization_method == "gymnasium":
-        env = gym.wrappers.NormalizeReward(env)
-    elif reward_normalization_method == "exponential":
-        env = NormalizeRewardsExponential(reward_alpha=reward_alpha, env=env)
-    if normalize_observations:
-        env = gym.wrappers.NormalizeObservation(env)
-    env = gym.wrappers.RecordEpisodeStatistics(env)
-    if seed is not None:
-        env.action_space.seed(seed)
-    return env
 
 
 def make_dro_pointmaze_envs(
