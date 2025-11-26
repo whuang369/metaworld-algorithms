@@ -84,9 +84,10 @@ def _init_pointmaze_task_env(
     reward_alpha: float = 0.001,
     flatten_observations: bool = False,
     render_mode: Literal["human", "rgb_array", "depth_array"] | None = None,
+    reward_type: int = 0,
 ):
     """Create a single PointMaze env wrapped like Meta-World tasks."""
-    env = PointMazeTaskEnv(env_name, render_mode=render_mode)
+    env = PointMazeTaskEnv(env_name, render_mode=render_mode, reward_type=reward_type)
     # if seed is not None:
     #     env.seed(seed)  # type: ignore
     env = gym.wrappers.TimeLimit(env, getattr(env, "max_episode_steps", 200))  # type: ignore
@@ -125,6 +126,7 @@ def make_eval_pointmaze_envs(
     reward_alpha: float = 0.001,
     render_mode: Literal["human", "rgb_array", "depth_array"] | None = None,
     flatten_observations: bool = True,
+    reward_type: int = 0,
 ) -> gym.vector.VectorEnv:
     """
     Create a DRO-ready PointMaze vector env with MultiTaskDROWrapper.
@@ -175,6 +177,7 @@ def make_eval_pointmaze_envs(
             reward_alpha=reward_alpha,
             flatten_observations=flatten_observations,
             render_mode=render_mode,
+            reward_type=reward_type,
         )
 
     def _make_env_internal(i: int) -> gym.Env:
@@ -210,6 +213,7 @@ def _eval_pointmaze_vector_entry_point(
         seed: int | None = None,
         use_one_hot: bool = False,
         num_envs: int | None = None,
+        reward_type: int = 0,
         **kwargs,
 ):
     del num_envs  # Gymnasium passes this when vectorizing; fixed worker count here.
@@ -218,6 +222,7 @@ def _eval_pointmaze_vector_entry_point(
         vector_strategy=vector_strategy,
         autoreset_mode=autoreset_mode,
         use_one_hot=use_one_hot,
+        reward_type=reward_type,
         **kwargs,
     )
 
@@ -228,12 +233,14 @@ register(
                               seed=None,
                               use_one_hot=False,
                               num_envs=None,
+                              reward_type=0,
                               **kwargs: _eval_pointmaze_vector_entry_point(
         vector_strategy=vector_strategy,
         autoreset_mode=autoreset_mode,
         seed=seed,
         use_one_hot=use_one_hot,
         num_envs=num_envs,
+        reward_type=reward_type,
         **kwargs,
     ),
     kwargs={},
@@ -260,11 +267,12 @@ class PointMazeTaskEnv(gym.Env):
 
     metadata = {}
 
-    def __init__(self, env_name: str, render_mode: str | None = None):
+    def __init__(self, env_name: str, render_mode: str | None = None, reward_type: int = 0):
         super().__init__()
         self._env_name = env_name
         self._render_mode = render_mode
-        self._env = gym.make(env_name)
+        kwargs = {'reward_type': reward_type}
+        self._env = gym.make(env_name, **kwargs)
         self.action_space = self._env.action_space
         self.observation_space = self._env.observation_space
         if (
@@ -313,6 +321,7 @@ def make_dro_pointmaze_envs(
     reward_alpha: float = 0.001,
     render_mode: Literal["human", "rgb_array", "depth_array"] | None = None,
     flatten_observations: bool = True,
+    reward_type: int = 0,
 ) -> gym.vector.VectorEnv:
     """
     Create a DRO-ready PointMaze vector env with MultiTaskDROWrapper.
@@ -355,6 +364,7 @@ def make_dro_pointmaze_envs(
             reward_alpha=reward_alpha,
             flatten_observations=flatten_observations,
             render_mode=render_mode,
+            reward_type=reward_type,
         )
 
     def _make_env_internal(i: int) -> gym.Env:
@@ -390,6 +400,7 @@ def _dro_pointmaze_vector_entry_point(
     seed: int | None = None,
     use_one_hot: bool = False,
     num_envs: int | None = None,
+    reward_type: int = 0,
     **kwargs,
 ) -> gym.vector.VectorEnv:
     del num_envs  # Gymnasium passes this when vectorizing; fixed worker count here.
@@ -398,6 +409,7 @@ def _dro_pointmaze_vector_entry_point(
         vector_strategy=vector_strategy,
         autoreset_mode=autoreset_mode,
         use_one_hot=use_one_hot,
+        reward_type=reward_type,
         **kwargs,
     )
 
@@ -409,12 +421,14 @@ register(
                               seed=None,
                               use_one_hot=False,
                               num_envs=None,
+                              reward_type=0,
                               **kwargs: _dro_pointmaze_vector_entry_point(
         vector_strategy=vector_strategy,
         autoreset_mode=autoreset_mode,
         seed=seed,
         use_one_hot=use_one_hot,
         num_envs=num_envs,
+        reward_type=reward_type,
         **kwargs,
     ),
     kwargs={},

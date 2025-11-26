@@ -187,8 +187,13 @@ class PointMazeEnv4(gym.Env):
 m = 3
 
 class UMazeEnv(gym.Env):
-    def __init__(self):
-        self.env = gym.make('PointMaze_UMaze-v3')
+    def __init__(self, reward_type: int = 0):
+        if reward_type == 0:
+            self.env = gym.make('PointMaze_UMazeDense-v3')
+            print("Dense is created")
+        else:
+            self.env = gym.make('PointMaze_UMaze-v3')
+            print("Sparse is created")
         self.action_space = self.env.action_space
         self.observation_space = gym.spaces.Box(np.array([-np.inf for _ in range(8)] + [0 for _ in range(m)]),
                                                 np.array([np.inf for _ in range(8)] + [1 for _ in range(m)]),
@@ -219,8 +224,11 @@ class UMazeEnv(gym.Env):
         return next_obs, {}
 
 class MediumEnv(gym.Env):
-    def __init__(self):
-        self.env = gym.make('PointMaze_Medium-v3')
+    def __init__(self, reward_type: int = 0):
+        if reward_type == 0:
+            self.env = gym.make('PointMaze_MediumDense-v3')
+        else:
+            self.env = gym.make('PointMaze_Medium-v3')
         self.action_space = self.env.action_space
         self.observation_space = gym.spaces.Box(np.array([-np.inf for _ in range(8)] + [0 for _ in range(m)]),
                                                 np.array([np.inf for _ in range(8)] + [1 for _ in range(m)]),
@@ -251,8 +259,11 @@ class MediumEnv(gym.Env):
         return next_obs, {}
 
 class LargeEnv(gym.Env):
-    def __init__(self):
-        self.env = gym.make('PointMaze_Large-v3')
+    def __init__(self, reward_type: int = 0):
+        if reward_type == 0:
+            self.env = gym.make('PointMaze_LargeDense-v3')
+        else:
+            self.env = gym.make('PointMaze_Large-v3')
         self.action_space = self.env.action_space
         self.observation_space = gym.spaces.Box(np.array([-np.inf for _ in range(8)] + [0 for _ in range(m)]),
                                                 np.array([np.inf for _ in range(8)] + [1 for _ in range(m)]),

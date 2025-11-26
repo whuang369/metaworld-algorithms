@@ -148,6 +148,8 @@ class Args:
     dro_eps: float = 0.05
     dro_min_prob: float = 0.05
 
+    sparse: int = 0
+
 
 # ---------------------------------------------------------------------------
 #  Main
@@ -164,12 +166,14 @@ def main() -> None:
 
     args.baseline_type = 'linear' if args.value_type == 'linear' else 'mlp'
 
+    dro_rollout_steps = args.rollout_steps
+
     run = Run(
         run_name=f"pointmaze_ppo_dro_{args.seed}",
         seed=args.seed,
         data_dir=args.data_dir,
-        env=PointMazeConfig(env_id="Pointmaze/dro_pointmaze", terminate_on_success=False),
-        eval_env=PointMazeConfig(env_id="Pointmaze/eval_pointmaze", terminate_on_success=True),
+        env=PointMazeConfig(env_id="Pointmaze/dro_pointmaze", terminate_on_success=False, reward_type=args.sparse),
+        eval_env=PointMazeConfig(env_id="Pointmaze/eval_pointmaze", terminate_on_success=True, reward_type=args.sparse),
         algorithm=PPOConfig(
             num_tasks=num_tasks,
             gamma=0.99,
@@ -184,7 +188,7 @@ def main() -> None:
             clip_vf_loss=False,
             reset_optimizer_steps=args.reset_optimizer_steps,
             normalize_advantages=args.normalize_advantages,
-            dro_upd_num_steps=args.dro_rollout_steps,
+            dro_upd_num_steps=dro_rollout_steps,
         ),
         training_config=OnPolicyTrainingConfig(
             total_steps=args.total_steps,
