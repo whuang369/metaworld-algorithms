@@ -183,3 +183,4 @@ run_results/
 /metaworld_algorithms/plotting/results/
 /metaworld_algorithms/plotting/figures/
 /gymnasium-robotics/
+/chtc/gen_commands.py
