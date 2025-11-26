@@ -11,6 +11,7 @@ if TYPE_CHECKING:
 class AlgorithmConfig:
     num_tasks: int
     gamma: float = 0.99
+    reset_optimizer_steps: int = 100_000
 
     def spawn(self, env: "EnvConfig", seed: int) -> "Algorithm":
         from metaworld_algorithms.rl.algorithms import get_algorithm_for_config
