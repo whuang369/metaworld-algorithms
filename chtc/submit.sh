@@ -10,7 +10,7 @@ sed 's/ /*/g' "$commands_file" > "$commands_file_tmp"
 
 USER_NAME=whuang369
 
-condor_submit job.sub \
+condor_submit job_configs/job.sub \
   results_dir=${results_dir} \
   log_dir=${log_dir} \
   commands_file=${commands_file_tmp} \
