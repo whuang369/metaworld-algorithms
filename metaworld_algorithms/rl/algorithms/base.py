@@ -769,6 +769,38 @@ class OnPolicyAlgorithm(
         )
 
     @staticmethod
+    def update_task_weights(gaps, eta, base=None):
+        """
+        Compute KL-regularized DRO task weights using q_i ∝ base_i * exp(eta * gap_i).
+
+        Parameters
+        ----------
+        gaps : np.ndarray
+            1D array of per-task gaps (e.g., reference - success).
+        eta : float
+            KL-DRO sharpness parameter (η = 0 gives uniform; η → ∞ gives argmax).
+        base : np.ndarray or None
+            Base distribution p0. If None, use uniform over tasks.
+
+        Returns
+        -------
+        np.ndarray
+            Normalized task weights q (same shape as gaps).
+        """
+        gaps = np.asarray(gaps)
+        if base is None:
+            base = np.ones_like(gaps) / len(gaps)
+        else:
+            base = np.asarray(base)
+            base = base / base.sum()  # ensure normalized
+
+        # Compute unnormalized exponentiated weights: p0_i * exp(η*g_i)
+        logits = np.log(base + 1e-12) + eta * gaps
+        weights = np.exp(logits - np.max(logits))  # stable softmax
+
+        return weights / weights.sum()
+
+    @staticmethod
     def exponentiated_gradient_ascent_step(w, returns, returns_ref, learning_rate=0.1,
                                            eps=0.05, min_prob=0.03):
         # Use s_t - s_{t-1} instead of s_ref - s_t
@@ -791,7 +823,8 @@ class OnPolicyAlgorithm(
             p = p / p.sum()  # renormalize
             return p
 
-        w_new = clip_and_normalize(w_new, c=min_prob)
+        for i in range(10):
+            w_new = clip_and_normalize(w_new, c=min_prob)
 
         return w_new
 
@@ -902,9 +935,10 @@ class OnPolicyAlgorithm(
             else:
                 raise NotImplementedError
 
+            success_ref = np.ones(self.num_tasks)
             dist = np.ones(self.num_tasks)/self.num_tasks
             # dist[:] = 0
-            # dist[4] = 1
+            # dist[12] = 1
             self.set_task_distributions(envs, dist)
 
         episode_started = np.ones((envs.num_envs,))
@@ -1021,26 +1055,94 @@ class OnPolicyAlgorithm(
                 #     dro_task_frac[i] = frac
                 # print("=" * 60)
 
-                success_ref = np.ones(len(dro_mean_success_per_task))
-                dist = self.exponentiated_gradient_ascent_step(
-                    w=dist,
-                    returns=dro_mean_success_per_task,
-                    returns_ref=success_ref,
-                    learning_rate=dro_learning_rate,
-                    eps=dro_eps,
-                    min_prob=dro_min_prob if dro_min_prob else 1/self.num_tasks * 1/10,
-                )
+                # for task_i in range(self.num_tasks):
+                #     success_ref[task_i] = np.clip(max(success_ref[task_i], dro_mean_success_per_task[task_i] + 0.1), 0, 1)
+                # success_ref = np.ones(self.num_tasks)
+                #
+                # success_ref_list = [
+                #     ("assembly-v3", 0.12),
+                #     ("basketball-v3", 0.82),
+                #     ("bin-picking-v3", 0.78),
+                #     ("box-close-v3", 1),
+                #     ("button-press-topdown-v3", 1),
+                #     ("button-press-topdown-wall-v3", 1),
+                #     ("button-press-v3", 1),
+                #     ("button-press-wall-v3", 1),
+                #     ("coffee-button-v3", 1),
+                #     ("coffee-pull-v3", 1),
+                #     ("coffee-push-v3", 1),
+                #     ("dial-turn-v3", 1),
+                #     ("disassemble-v3", 0.08),
+                #     ("door-close-v3", 1),
+                #     ("door-lock-v3", 1),
+                #     ("door-open-v3", 1),
+                #     ("door-unlock-v3", 1),
+                #     ("hand-insert-v3", 1),
+                #     ("drawer-close-v3", 1),
+                #     ("drawer-open-v3", 1),
+                #     ("faucet-open-v3", 1),
+                #     ("faucet-close-v3", 1),
+                #     ("hammer-v3", 1),
+                #     ("handle-press-side-v3", 1),
+                #     ("handle-press-v3", 1),
+                #     ("handle-pull-side-v3", 1),
+                #     ("handle-pull-v3", 1),
+                #     ("lever-pull-v3", 1),
+                #     ("pick-place-wall-v3", 0.96),
+                #     ("pick-out-of-hole-v3", 1),
+                #     ("pick-place-v3", 1),
+                #     ("plate-slide-v3", 1),
+                #     ("plate-slide-side-v3", 1),
+                #     ("plate-slide-back-v3", 1),
+                #     ("plate-slide-back-side-v3", 1),
+                #     ("peg-insert-side-v3", 1),
+                #     ("peg-unplug-side-v3", 1),
+                #     ("soccer-v3", 0.88),
+                #     ("stick-push-v3", 1),
+                #     ("stick-pull-v3", 0.66),
+                #     ("push-v3", 1),
+                #     ("push-wall-v3", 1),
+                #     ("push-back-v3", 1),
+                #     ("reach-v3", 1),
+                #     ("reach-wall-v3", 1),
+                #     ("shelf-place-v3", 1),
+                #     ("sweep-into-v3", 1),
+                #     ("sweep-v3", 1),
+                #     ("window-open-v3", 1),
+                #     ("window-close-v3", 1),
+                # ]
+                #
+                # # Extract names and numeric values
+                # task_names = np.array([x[0] for x in success_ref_list])
+                # success_ref = np.array([x[1] for x in success_ref_list], dtype=float)
+
+
+
+                # dist = self.exponentiated_gradient_ascent_step(
+                #     w=dist,
+                #     returns=dro_mean_success_per_task,
+                #     returns_ref=success_ref,
+                #     learning_rate=dro_learning_rate,
+                #     eps=dro_eps,
+                #     min_prob=dro_min_prob if dro_min_prob else 1/self.num_tasks * 1/10,
+                # )
+
+                gaps = success_ref - dro_mean_success_per_task
+                dist = self.update_task_weights(gaps, eta=dro_learning_rate)
+
                 # dist[:] = 0
-                # dist[4] = 1
+                # dist[12] = 1
                 self.set_task_distributions(envs, dist)
 
                 if track:
                     dro_metrics = {}
                     for i, task_name in enumerate(task_names):
                         dro_metrics[f'dro/{task_name}_success_rate'] = dro_mean_success_per_task[i]
-                        dro_metrics[f"dro/{task_name}_frac"] = dro_task_frac[i]
+                        # dro_metrics[f"dro/{task_name}_frac"] = dro_task_frac[i]
                         dro_metrics[f"dro/{task_name}_weight"] = dist[i]
                         dro_metrics[f"dro/{task_name}_return"] = dro_mean_return_per_task[i]
+                        dro_metrics[f"dro/{task_name}_ref"] = success_ref[i]
+
                         log(dro_metrics, step=total_steps)
 
                 dro_task_return_sum[:] = 0
