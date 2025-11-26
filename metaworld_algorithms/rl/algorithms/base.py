@@ -40,7 +40,6 @@ from metaworld_algorithms.types import (
     RNNState,
     Rollout,
 )
-from metaworld_algorithms.rl.algorithms.utils import get_task_names_from_vector_env
 from metaworld.env_dict import ALL_V3_ENVIRONMENTS, MT10_V3, MT25_V3, MT50_V3
 
 AlgorithmConfigType = TypeVar("AlgorithmConfigType", bound=AlgorithmConfig)

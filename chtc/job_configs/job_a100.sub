@@ -2,7 +2,7 @@
 
 universe = vanilla
 
-executable = job.sh
+executable = job_configs/job.sh
 initial_dir = $(results_dir)
 log = ../../$(log_dir)/$(Process).log
 output = ../../$(log_dir)/$(Process).out
