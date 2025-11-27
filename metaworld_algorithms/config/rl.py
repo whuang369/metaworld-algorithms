@@ -23,6 +23,20 @@ class AlgorithmConfig:
 class TrainingConfig:
     total_steps: int
     evaluation_frequency: int = 200_000 // 500
+    reset_optimizer_steps: int = -1
+
+    dro: bool = True
+    dro_rollout_steps: int = 10_000
+
+    # for DRO over a KL ball
+    dro_eta: float = 3.0
+    dro_learning_rate: float = 0.1
+
+    # for DRO over the probability simplex -- not used currently
+    dro_eps: float = 0.05
+    dro_min_prob: float = 0.05
+
+
     """Evaluation frequency in total environment episodes."""
 
 

@@ -52,12 +52,6 @@ class Run:
     resume: bool = False
 
     eval_env: EnvConfig = None
-    reset_optimizer_steps: int = 100_000
-
-    dro: bool = False
-    dro_learning_rate: float = 0.1
-    dro_eps: float = 0.01
-    dro_min_prob: float | None = None
 
     def __post_init__(self) -> None:
         self._wandb_enabled = False
@@ -199,11 +193,6 @@ class Run:
             checkpoint_metadata=checkpoint_metadata,
             buffer_checkpoint=buffer_checkpoint,
             eval_env=eval_envs,
-            reset_optimizer_steps=self.reset_optimizer_steps,
-            dro=self.dro,
-            dro_learning_rate=self.dro_learning_rate,
-            dro_eps=self.dro_eps,
-            dro_min_prob=self.dro_min_prob
         )
 
         # Cleanup

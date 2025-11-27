@@ -137,6 +137,7 @@ class Args:
     num_epochs: int = 8
     num_gradient_steps: int = 32
     rollout_steps: int = 10_000
+    entropy_coefficient: float = 1e-2
     normalize_advantages: int = 1
     reset_optimizer_steps: int = -1
 
@@ -144,7 +145,10 @@ class Args:
     value_type: Literal["linear", "single_head", "multi_head", "mlp", "moore"] = "multi_head"
 
     dro_rollout_steps: int = 10_000
-    dro_learning_rate: float = 1.0
+    dro_eta: float = 3.0
+    dro_learning_rate: float = 0.1
+
+    # for DRO over the probability simplex -- not used currently
     dro_eps: float = 0.05
     dro_min_prob: float = 0.05
 
@@ -184,23 +188,23 @@ def main() -> None:
             num_gradient_steps=32,
             gae_lambda=0.97,
             target_kl=0.05,
-            entropy_coefficient=1e-2,
+            entropy_coefficient=args.entropy_coefficient,
             clip_vf_loss=False,
             reset_optimizer_steps=args.reset_optimizer_steps,
             normalize_advantages=args.normalize_advantages,
-            dro_upd_num_steps=args.dro_rollout_steps,
         ),
         training_config=OnPolicyTrainingConfig(
             total_steps=args.total_steps,
             rollout_steps=args.rollout_steps,
             evaluation_frequency=args.evaluation_frequency,
+            dro=True,
+            dro_learning_rate=args.dro_learning_rate,
+            dro_eta=args.dro_eta,
+            dro_eps=args.dro_eps,
+            dro_min_prob=args.dro_min_prob,
         ),
         checkpoint=True,
         resume=args.resume,
-        dro=True,
-        dro_learning_rate=args.dro_learning_rate,
-        dro_eps=args.dro_eps,
-        dro_min_prob=args.dro_min_prob,
     )
 
     if args.track:

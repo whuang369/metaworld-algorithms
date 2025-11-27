@@ -83,11 +83,6 @@ class Algorithm(
         checkpoint_metadata: CheckpointMetadata | None = None,
         buffer_checkpoint: ReplayBufferCheckpoint | None = None,
         eval_env: GymVectorEnv = None,
-        reset_optimizer_steps: int = 100_000,
-        dro: bool = False,
-        dro_learning_rate: float = 0.1,
-        dro_eps: float = 0.05,
-        dro_min_prob: float = 0.05,
     ) -> Self: ...
 
 
@@ -125,9 +120,6 @@ class MetaLearningAlgorithm(
         checkpoint_metadata: CheckpointMetadata | None = None,
         buffer_checkpoint: ReplayBufferCheckpoint | None = None,
         eval_env: GymVectorEnv = None,
-        dro: bool = False,
-        dro_learning_rate: float = 0.1,
-        dro_eps: float = 0.05,
     ) -> Self: ...
 
 
@@ -176,9 +168,6 @@ class GradientBasedMetaLearningAlgorithm(
         checkpoint_metadata: CheckpointMetadata | None = None,
         buffer_checkpoint: ReplayBufferCheckpoint | None = None,
         eval_env: GymVectorEnv = None,
-        dro: bool = False,
-        dro_learning_rate: float = 0.1,
-        dro_eps: float = 0.05,
     ) -> Self:
         global_episodic_return: Deque[float] = deque([], maxlen=20 * self.num_tasks)
         global_episodic_length: Deque[int] = deque([], maxlen=20 * self.num_tasks)
@@ -390,9 +379,6 @@ class RNNBasedMetaLearningAlgorithm(
         checkpoint_metadata: CheckpointMetadata | None = None,
         buffer_checkpoint: ReplayBufferCheckpoint | None = None,
         eval_env: GymVectorEnv = None,
-        dro: bool = False,
-        dro_learning_rate: float = 0.1,
-        dro_eps: float = 0.05,
     ) -> Self:
         global_episodic_return: Deque[float] = deque([], maxlen=20 * self.num_tasks)
         global_episodic_length: Deque[int] = deque([], maxlen=20 * self.num_tasks)
@@ -589,9 +575,6 @@ class OffPolicyAlgorithm(
         checkpoint_metadata: CheckpointMetadata | None = None,
         buffer_checkpoint: ReplayBufferCheckpoint | None = None,
         eval_env: GymVectorEnv = None,
-        dro: bool = False,
-        dro_learning_rate: float = 0.1,
-        dro_eps: float = 0.05,
     ) -> Self:
         global_episodic_return: Deque[float] = deque([], maxlen=20 * self.num_tasks)
         global_episodic_length: Deque[int] = deque([], maxlen=20 * self.num_tasks)
@@ -767,65 +750,134 @@ class OnPolicyAlgorithm(
             seed,
         )
 
+    # @staticmethod
+    # def update_task_weights(gaps, eta, base=None):
+    #     """
+    #     Compute KL-regularized DRO task weights using q_i ∝ base_i * exp(eta * gap_i).
+    #
+    #     Parameters
+    #     ----------
+    #     gaps : np.ndarray
+    #         1D array of per-task gaps (e.g., reference - success).
+    #     eta : float
+    #         KL-DRO sharpness parameter (η = 0 gives uniform; η → ∞ gives argmax).
+    #     base : np.ndarray or None
+    #         Base distribution p0. If None, use uniform over tasks.
+    #
+    #     Returns
+    #     -------
+    #     np.ndarray
+    #         Normalized task weights q (same shape as gaps).
+    #     """
+    #     gaps = np.asarray(gaps)
+    #     if base is None:
+    #         base = np.ones_like(gaps) / len(gaps)
+    #     else:
+    #         base = np.asarray(base)
+    #         base = base / base.sum()  # ensure normalized
+    #
+    #     # Compute unnormalized exponentiated weights: p0_i * exp(η*g_i)
+    #     logits = np.log(base + 1e-12) + eta * gaps
+    #     weights = np.exp(logits - np.max(logits))  # stable softmax
+    #
+    #     return weights / weights.sum()
+
+    # @staticmethod
+    # def exponentiated_gradient_ascent_step(w, returns, returns_ref, learning_rate=0.1,
+    #                                        eps=0.05, min_prob=0.03):
+    #     # Use s_t - s_{t-1} instead of s_ref - s_t
+    #     diff = np.clip(returns_ref - returns, 0, np.inf)
+    #
+    #     w_new = w * np.exp(learning_rate * diff)
+    #
+    #     # Normalize to ensure weights sum to 1
+    #     w_new = w_new / w_new.sum()
+    #
+    #     # Smoothing to prevent weights form getting too close to 0
+    #     w_uniform = 1 / len(w_new) * np.ones(len(w_new))
+    #     w_new = (1 - eps) * w_new + eps * w_uniform
+    #
+    #     # w_focus = np.zeros(len(w_new))
+    #     # w_focus[env_id] = 1.0
+    #     # w_new = 0.5 * w_new + 0.5 * w_focus
+    #     def clip_and_normalize(p, c=0.01):
+    #         p = np.maximum(p, c)  # clip
+    #         p = p / p.sum()  # renormalize
+    #         return p
+    #
+    #     for i in range(10):
+    #         w_new = clip_and_normalize(w_new, c=min_prob)
+    #
+    #     return w_new
+
     @staticmethod
-    def update_task_weights(gaps, eta, base=None):
+    def update_task_weights(q, gap, eta, step_size, p0=None):
         """
-        Compute KL-regularized DRO task weights using q_i ∝ base_i * exp(eta * gap_i).
+        Perform ONE exponentiated-gradient (mirror-ascent) step on the
+        KL-regularized DRO objective:
+
+            maximize_q   gap^T q  -  (1/eta) * KL(q || p0)
 
         Parameters
         ----------
-        gaps : np.ndarray
-            1D array of per-task gaps (e.g., reference - success).
+        self : object
+            Class instance (unused here but required for method form).
+        q : np.ndarray, shape (k,)
+            Current task weights (must sum to 1).
+        gap : np.ndarray, shape (k,)
+            Task "gaps" (e.g., 1 - success_rate or return gap). Should be in [0,1].
         eta : float
-            KL-DRO sharpness parameter (η = 0 gives uniform; η → ∞ gives argmax).
-        base : np.ndarray or None
-            Base distribution p0. If None, use uniform over tasks.
+            DRO regularization strength (controls how sharp the *target* q* is).
+        step_size : float
+            Mirror-ascent step size. Must satisfy 0 < step_size <= eta.
+            - step_size = eta  → jump directly to closed-form optimum q*.
+            - step_size < eta  → partial, smoothed update.
+        p0 : np.ndarray or None
+            Base distribution. If None, defaults to uniform.
 
         Returns
         -------
-        np.ndarray
-            Normalized task weights q (same shape as gaps).
+        q_new : np.ndarray, shape (k,)
+            Updated task weights (sum to 1).
+
+
+        Notes
+        -----
+        Let q* be the CLOSED-FORM optimum of the KL-regularized objective:
+
+            q*_i ∝ p0_i * exp(eta * gap_i)
+
+        Define alpha = step_size / eta.
+
+        Then the mirror-ascent update implemented here is EXACTLY:
+
+            q_{t+1,i} ∝ q_{t,i}^{1 - alpha} * (q*_i)^{alpha}.
+
+        This is **geometric Polyak averaging** (EMA in KL geometry) toward q*:
+
+            - alpha = 1  (step_size = eta)  →  q_{t+1} = q* in one update.
+            - 0 < alpha < 1  →  smooth, stable averaging toward q*.
         """
-        gaps = np.asarray(gaps)
-        if base is None:
-            base = np.ones_like(gaps) / len(gaps)
-        else:
-            base = np.asarray(base)
-            base = base / base.sum()  # ensure normalized
 
-        # Compute unnormalized exponentiated weights: p0_i * exp(η*g_i)
-        logits = np.log(base + 1e-12) + eta * gaps
-        weights = np.exp(logits - np.max(logits))  # stable softmax
+        k = len(q)
 
-        return weights / weights.sum()
+        # Default p0: uniform
+        if p0 is None:
+            p0 = np.ones(k) / k
 
-    @staticmethod
-    def exponentiated_gradient_ascent_step(w, returns, returns_ref, learning_rate=0.1,
-                                           eps=0.05, min_prob=0.03):
-        # Use s_t - s_{t-1} instead of s_ref - s_t
-        diff = np.clip(returns_ref - returns, 0, np.inf)
+        # Compute alpha = gamma/eta (the geometric Polyak averaging rate)
+        alpha = step_size / eta  # must satisfy 0 < alpha <= 1
 
-        w_new = w * np.exp(learning_rate * diff)
+        # Numerically stable mirror-ascent update:
+        #   log q_new ∝ (1-alpha)*log q  +  alpha*log p0  +  step_size * gap
+        log_q_new = (1 - alpha) * np.log(q) + alpha * np.log(p0) + step_size * gap
 
-        # Normalize to ensure weights sum to 1
-        w_new = w_new / w_new.sum()
+        # Normalize via log-sum-exp
+        log_q_new -= np.max(log_q_new)
+        q_new = np.exp(log_q_new)
+        q_new /= q_new.sum()
 
-        # Smoothing to prevent weights form getting too close to 0
-        w_uniform = 1 / len(w_new) * np.ones(len(w_new))
-        w_new = (1 - eps) * w_new + eps * w_uniform
-
-        # w_focus = np.zeros(len(w_new))
-        # w_focus[env_id] = 1.0
-        # w_new = 0.5 * w_new + 0.5 * w_focus
-        def clip_and_normalize(p, c=0.01):
-            p = np.maximum(p, c)  # clip
-            p = p / p.sum()  # renormalize
-            return p
-
-        for i in range(10):
-            w_new = clip_and_normalize(w_new, c=min_prob)
-
-        return w_new
+        return q_new
 
     @staticmethod
     def set_task_distributions(
@@ -890,10 +942,6 @@ class OnPolicyAlgorithm(
         buffer_checkpoint: ReplayBufferCheckpoint | None = None,
         eval_env: GymVectorEnv = None,
         reset_optimizer_steps: int = 100_000,
-        dro: bool = False,
-        dro_learning_rate: float = 0.1,
-        dro_eps: float = 0.05,
-        dro_min_prob: float = None,
     ) -> Self:
         global_episodic_return: Deque[float] = deque([], maxlen=20 * self.num_tasks)
         global_episodic_length: Deque[int] = deque([], maxlen=20 * self.num_tasks)
@@ -920,7 +968,7 @@ class OnPolicyAlgorithm(
         #     print(env.tasks)
         # exit()
 
-        if dro:
+        if config.dro:
             if self.num_tasks == 10:
                 task_names = list(MT10_V3.keys())
             elif self.num_tasks == 25:
@@ -954,8 +1002,6 @@ class OnPolicyAlgorithm(
         # Track update count for DRO updates
         update_count = 0
         eval_count = 0
-
-        dro_num_steps = getattr(self, 'dro_upd_num_steps', None)
 
         for global_step in range(start_step, config.total_steps // envs.num_envs):
             total_steps = global_step * envs.num_envs
@@ -1037,7 +1083,7 @@ class OnPolicyAlgorithm(
                         step=total_steps,
                     )
 
-            if dro and (global_step+1) % dro_num_steps == 0:
+            if config.dro and (global_step+1) % config.dro_rollout_steps == 0:
                 # success rate should be zero for tasks we did not sample.
                 dro_task_attempts[dro_task_attempts == 0] = 1
                 dro_mean_success_per_task = dro_task_success_any_step / dro_task_attempts
@@ -1127,7 +1173,7 @@ class OnPolicyAlgorithm(
                 # )
 
                 gaps = success_ref - dro_mean_success_per_task
-                dist = self.update_task_weights(gaps, eta=dro_learning_rate)
+                dist = self.update_task_weights(q=dist, gap=gaps, eta=config.dro_eta, step_size=config.dro_learning_rate)
 
                 # dist[:] = 0
                 # dist[12] = 1
@@ -1140,7 +1186,7 @@ class OnPolicyAlgorithm(
                         # dro_metrics[f"dro/{task_name}_frac"] = dro_task_frac[i]
                         dro_metrics[f"dro/{task_name}_weight"] = dist[i]
                         dro_metrics[f"dro/{task_name}_return"] = dro_mean_return_per_task[i]
-                        dro_metrics[f"dro/{task_name}_ref"] = success_ref[i]
+                        # dro_metrics[f"dro/{task_name}_ref"] = success_ref[i]
 
                         log(dro_metrics, step=total_steps)
 
