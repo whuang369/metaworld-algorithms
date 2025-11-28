@@ -1262,7 +1262,7 @@ class OnPolicyAlgorithm(
                     and global_step > 0
                 ):
                     eval_count += 1
-                    if eval_env is None or dro==False:
+                    if eval_env is None or config.dro==False:
                         mean_success_rate, mean_returns, mean_success_per_task = (
                             env_config.evaluate(envs, self)
                         )
