@@ -51,6 +51,156 @@ MetaLearningTrainingConfigType = TypeVar(
 DataType = TypeVar("DataType", ReplayBufferSamples, Rollout, list[Rollout])
 
 
+from dataclasses import dataclass, field
+import numpy as np
+class SMTScheduler:
+    def __init__(self,
+                 num_tasks,
+                 K=3,
+                 threshold_low=np.array([2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000]),
+                 threshold_high=np.array([4000, 3000, 3000, 4000, 4000, 4000, 3000, 3500, 4000, 4000]),
+                 kappa=0.8,
+                 total_budget=100_000_000,
+                 stage1_budget=85_000_000,
+                 min_prob=1/10/4):
+
+        if num_tasks == 50:
+            self.K = 8
+            self.threshold_low = np.array([
+                2000 for _ in range(50)
+            ])
+            self.threshold_high = np.array([
+                3000,  # assembly-v3
+                2000,  # basketball-v3
+                3000,  # bin-picking-v3
+                3000,  # box-close-v3
+                3000,  # button-press-topdown-v3
+                3000,  # button-press-topdown-wall-v3
+                3500,  # button-press-v3
+                3500,  # button-press-wall-v3
+                3000,  # coffee-button-v3
+                2000,  # coffee-pull-v3
+                2000,  # coffee-push-v3
+                3500,  # dial-turn-v3
+                3000,  # disassemble-v3
+                4000,  # door-close-v3
+                3000,  # door-lock-v3
+                4000,  # door-open-v3
+                3000,  # door-unlock-v3
+                3500,  # hand-insert-v3
+                4000,  # drawer-close-v3
+                4000,  # drawer-open-v3
+                4000,  # faucet-open-v3
+                4000,  # faucet-close-v3
+                3000,  # hammer-v3
+                4000,  # handle-press-side-v3
+                4000,  # handle-press-v3
+                3000,  # handle-pull-side-v3
+                3500,  # handle-pull-v3
+                2500,  # lever-pull-v3
+                3000,  # pick-place-wall-v3
+                3000,  # pick-out-of-hole-v3
+                3000,  # pick-place-v3
+                4000,  # plate-slide-v3
+                3500,  # plate-slide-side-v3
+                4000,  # plate-slide-back-v3
+                4000,  # plate-slide-back-side-v3
+                3500,  # peg-insert-side-v3
+                3500,  # peg-unplug-side-v3
+                2000,  # soccer-v3
+                2500,  # stick-push-v3
+                2000,  # stick-pull-v3
+                3000,  # push-v3
+                3000,  # push-wall-v3
+                3000,  # push-back-v3
+                4000,  # reach-v3
+                4000,  # reach-wall-v3
+                3000,  # shelf-place-v3
+                3500,  # sweep-into-v3
+                3000,  # sweep-v3
+                4000,  # window-open-v3
+                4000,  # window-close-v3
+            ])
+            self.kappa = 0.8
+            self.total_budget = 500_000_000
+            self.stage1_budget = 425_000_000
+            self.min_prob=1/10/4
+        else:
+            self.K = K
+            self.num_tasks = num_tasks
+            self.threshold_low = threshold_low
+            self.threshold_high = threshold_high
+            self.kappa = kappa
+            self.stage1_budget = stage1_budget
+            self.min_prob = min_prob
+
+        self.steps = 0
+        self.eval_metrics = np.full(num_tasks, -np.inf)
+        self.budgets = np.zeros(num_tasks, dtype=int)
+        self.steps_since_scheduled = np.zeros(num_tasks, dtype=int)
+
+        all_tasks = list(range(num_tasks))
+        np.random.shuffle(all_tasks)
+        self.pool_main       = all_tasks[K:]
+        self.pool_active     = all_tasks[:K]
+        self.pool_solved     = []
+        self.pool_unsolvable = []
+
+        self.budgets[self.pool_active] = int(kappa * total_budget / K)
+
+    def _make_distribution(self):
+        dist = np.full(self.num_tasks, self.min_prob)
+        if self.pool_active:
+            active_prob = (1.0 - self.min_prob * self.num_tasks) / len(self.pool_active)
+            dist[self.pool_active] += active_prob
+
+        dist /= np.sum(dist) # normalize so that when all tasks are solved, we go back to uniform
+        print(f'{dist=}')
+
+        return dist
+
+    def _evict(self, task_id, dest):
+        dest.append(task_id)
+        self.pool_active.remove(task_id)
+        self.steps_since_scheduled[task_id] = 0
+
+    def update(self, steps_used, eval_metrics):
+        """
+        Args:
+            steps_used:   np.ndarray of shape (num_tasks,), steps used per task since last update
+            eval_metrics: np.ndarray of shape (num_tasks,), lower = harder
+        Returns:
+            np.ndarray of shape (num_tasks,) — sampling distribution over tasks
+        """
+        self.steps += steps_used.sum()
+        self.steps_since_scheduled += steps_used
+        self.eval_metrics = eval_metrics
+
+        if self.steps >= self.stage1_budget:
+            self.pool_active = self.pool_unsolvable
+            self.pool_unsolvable = []
+            return self._make_distribution()
+
+        for task_id in list(self.pool_active):
+            metric = self.eval_metrics[task_id]
+            if metric > self.threshold_high[task_id]:
+                self._evict(task_id, self.pool_solved)
+            elif self.steps_since_scheduled[task_id] >= self.budgets[task_id]:
+                dest = self.pool_unsolvable if metric < self.threshold_low[task_id] else self.pool_main
+                self._evict(task_id, dest)
+
+        remaining_budget = self.stage1_budget - self.steps
+        while len(self.pool_active) < self.K and self.pool_main:
+            new_task = min(self.pool_main, key=lambda t: self.eval_metrics[t])
+            self.pool_main.remove(new_task)
+            self.pool_active.append(new_task)
+            self.budgets[new_task] = int(self.kappa * remaining_budget / self.K)
+            self.steps_since_scheduled[new_task] = 0
+
+        print(f'{self.budgets=}')
+
+        return self._make_distribution()
+
 class Algorithm(
     abc.ABC,
     Generic[AlgorithmConfigType, TrainingConfigType, EnvConfigType, DataType],
@@ -810,53 +960,88 @@ class OnPolicyAlgorithm(
     #
     #     return w_new
 
+    ##########################################################################
+    # KL PROJECTION onto { q in simplex : q_i >= dro_eps }
+    ##########################################################################
     @staticmethod
-    def update_task_weights(q, gap, eta, step_size, p0=None):
+    def kl_project_with_floor(z, dro_eps):
+        """
+        KL projection of distribution z onto the convex set:
+            { q : q_i >= dro_eps,  sum_i q_i = 1 }
+
+        Solves:
+            minimize_q KL(q || z)
+            subject to q_i >= dro_eps.
+
+        Returns a valid probability vector q.
+        """
+        z = np.asarray(z, dtype=float)
+        z = z / z.sum()  # ensure distribution
+        k = len(z)
+
+        # Start with all coordinates "free"
+        free = np.ones(k, dtype=bool)
+        q = np.zeros_like(z)
+
+        while True:
+            num_clipped = (~free).sum()
+            mass_free = 1.0 - dro_eps * num_clipped
+
+            if mass_free < 0:
+                # dro_eps too large to be feasible; fallback
+                return np.ones(k) / k
+
+            z_free_sum = z[free].sum()
+
+            if z_free_sum == 0:
+                # degenerate free mass
+                q[free] = mass_free / free.sum()
+            else:
+                scale = mass_free / z_free_sum
+                q[free] = scale * z[free]
+
+            # Clipped ones set to dro_eps
+            q[~free] = dro_eps
+
+            # If any free entries fell below dro_eps, move them to clipped set
+            violated = free & (q < dro_eps - 1e-12)
+            if not violated.any():
+                break
+
+            free[violated] = False
+
+        q /= q.sum()  # final normalization
+        return q
+
+    ##########################################################################
+    # MAIN DRO UPDATE WITH OPTIONAL KL PROJECTION (dro_eps)
+    ##########################################################################
+    def update_task_weights(self, q, gap, eta, step_size, p0=None, dro_eps=None):
         """
         Perform ONE exponentiated-gradient (mirror-ascent) step on the
         KL-regularized DRO objective:
 
             maximize_q   gap^T q  -  (1/eta) * KL(q || p0)
 
+        Includes an optional KL projection enforcing q_i >= dro_eps.
+
         Parameters
         ----------
-        self : object
-            Class instance (unused here but required for method form).
         q : np.ndarray, shape (k,)
-            Current task weights (must sum to 1).
+            Current task weights.
         gap : np.ndarray, shape (k,)
-            Task "gaps" (e.g., 1 - success_rate or return gap). Should be in [0,1].
         eta : float
-            DRO regularization strength (controls how sharp the *target* q* is).
+            DRO regularization strength.
         step_size : float
-            Mirror-ascent step size. Must satisfy 0 < step_size <= eta.
-            - step_size = eta  → jump directly to closed-form optimum q*.
-            - step_size < eta  → partial, smoothed update.
+            Mirror ascent step size. Must satisfy 0 < step_size <= eta.
         p0 : np.ndarray or None
-            Base distribution. If None, defaults to uniform.
+            Base distribution for KL regularization.
+        dro_eps : float or None
+            If provided, enforce q_i >= dro_eps by KL projection.
 
         Returns
         -------
         q_new : np.ndarray, shape (k,)
-            Updated task weights (sum to 1).
-
-
-        Notes
-        -----
-        Let q* be the CLOSED-FORM optimum of the KL-regularized objective:
-
-            q*_i ∝ p0_i * exp(eta * gap_i)
-
-        Define alpha = step_size / eta.
-
-        Then the mirror-ascent update implemented here is EXACTLY:
-
-            q_{t+1,i} ∝ q_{t,i}^{1 - alpha} * (q*_i)^{alpha}.
-
-        This is **geometric Polyak averaging** (EMA in KL geometry) toward q*:
-
-            - alpha = 1  (step_size = eta)  →  q_{t+1} = q* in one update.
-            - 0 < alpha < 1  →  smooth, stable averaging toward q*.
         """
 
         k = len(q)
@@ -865,17 +1050,21 @@ class OnPolicyAlgorithm(
         if p0 is None:
             p0 = np.ones(k) / k
 
-        # Compute alpha = gamma/eta (the geometric Polyak averaging rate)
-        alpha = step_size / eta  # must satisfy 0 < alpha <= 1
+        # geometric Polyak averaging rate
+        alpha = step_size / eta  # in [0,1]
 
-        # Numerically stable mirror-ascent update:
-        #   log q_new ∝ (1-alpha)*log q  +  alpha*log p0  +  step_size * gap
+        # Mirror-ascent step:
+        #   log q_new ∝ (1-alpha) log q + alpha log p0 + step_size * gap
         log_q_new = (1 - alpha) * np.log(q) + alpha * np.log(p0) + step_size * gap
 
-        # Normalize via log-sum-exp
+        # log-sum-exp normalize
         log_q_new -= np.max(log_q_new)
         q_new = np.exp(log_q_new)
         q_new /= q_new.sum()
+
+        # KL PROJECT if dro_eps provided
+        if dro_eps is not None and dro_eps > 0:
+            q_new = self.kl_project_with_floor(q_new, dro_eps)
 
         return q_new
 
@@ -947,6 +1136,11 @@ class OnPolicyAlgorithm(
         global_episodic_length: Deque[int] = deque([], maxlen=20 * self.num_tasks)
         # global_episodic_return: Deque[float] = deque([], maxlen=20 * self.num_tasks)
 
+        success_history = [deque([], maxlen=50) for _ in range(self.num_tasks)]
+        return_max = np.zeros(self.num_tasks)
+        return_ref = np.ones(self.num_tasks) * 5000
+        is_task_past_threshold = np.zeros(self.num_tasks)
+
         task_return_sum = np.zeros(self.num_tasks)
         task_success_any_step = np.zeros(self.num_tasks)
         task_attempts = np.zeros(self.num_tasks)
@@ -955,8 +1149,13 @@ class OnPolicyAlgorithm(
         dro_task_success_any_step = np.zeros(self.num_tasks)
         dro_task_attempts = np.zeros(self.num_tasks)
         dro_task_counts = np.zeros(self.num_tasks)
+        dro_task_steps = np.zeros(self.num_tasks, dtype=int)
+
+        dro_mean_return_per_task_prev = None
 
         task_success_already_found = np.zeros(self.num_tasks)
+
+        task_abs_adv = None
 
         obs, _ = envs.reset()
 
@@ -987,6 +1186,13 @@ class OnPolicyAlgorithm(
             # dist[:] = 0
             # dist[12] = 1
             self.set_task_distributions(envs, dist)
+
+            rng = np.random.default_rng(seed)
+
+            smt_scheduler = SMTScheduler(
+                num_tasks=self.num_tasks,
+            )
+            smt_steps_used = np.zeros(self.num_tasks, dtype=int)
 
         episode_started = np.ones((envs.num_envs,))
         start_step, episodes_ended = 0, 0
@@ -1025,6 +1231,8 @@ class OnPolicyAlgorithm(
 
             # Meta-World does not terminate on success during training, 
             # so we need to check *every* transition for success, not just the last one.
+            # Be careful not to confuse index i with task_id.
+            # task_success_already_found is indexed by i, not task_id. We reset it every episode.
             for i in range(self.num_tasks):
                 if task_success_already_found[i] == 1:
                     continue
@@ -1039,7 +1247,6 @@ class OnPolicyAlgorithm(
                     is_success = infos["success"][i]
 
                 task_success_any_step[task_id] += is_success
-
                 dro_task_success_any_step[task_id] += is_success
 
                 if is_success:
@@ -1062,118 +1269,91 @@ class OnPolicyAlgorithm(
                     task_return_sum[task_id] += infos["final_info"]["episode"]["r"][i]
                     dro_task_return_sum[task_id] += infos["final_info"]["episode"]["r"][i]
 
+                    # if task_success_already_found[i]:
+                    #     return_ref[task_id] = max(
+                    #         return_ref[task_id],
+                    #         infos["final_info"]["episode"]["r"][i]
+                    #     )
+
+                    success_history[task_id].append(task_success_already_found[i])
+
+                    if is_task_past_threshold[task_id] == 0 and len(success_history[task_id]) == 50 and np.mean(success_history[task_id]) > 0.5:
+                        is_task_past_threshold[task_id] = 1
+
+                    return_max[task_id] = max(
+                        return_max[task_id],
+                        infos["final_info"]["episode"]["r"][i]
+                    )
+                    if is_task_past_threshold[task_id] == 1:
+                        return_ref[task_id] = return_max[task_id]
+
                     # end of episode, so reset our search for a success in the next trajectory
                     task_success_already_found[i] = 0
 
-            if global_step % 500 == 0 and global_episodic_return:
-                print(
-                    f"global_step={total_steps}, mean_episodic_return={np.mean(list(global_episodic_return))}"
-                )
+                    dro_task_steps[task_id] += int(infos["final_info"]["episode"]["l"][i])
 
-                if track:
-                    log(
-                        {
-                            "charts/mean_episodic_return": np.mean(
-                                list(global_episodic_return)
-                            ),
-                            "charts/mean_episodic_length": np.mean(
-                                list(global_episodic_length)
-                            ),
-                        },
-                        step=total_steps,
-                    )
+            # if global_step % 500 == 0 and global_episodic_return:
+            #     print(
+            #         f"global_step={total_steps}, mean_episodic_return={np.mean(list(global_episodic_return))}"
+            #     )
+            #
+            #     if track:
+            #         log(
+            #             {
+            #                 "charts/mean_episodic_return": np.mean(
+            #                     list(global_episodic_return)
+            #                 ),
+            #                 "charts/mean_episodic_length": np.mean(
+            #                     list(global_episodic_length)
+            #                 ),
+            #             },
+            #             step=total_steps,
+            #         )
 
-            if config.dro and (global_step+1) % config.dro_rollout_steps == 0:
+            if (global_step+1) % config.dro_rollout_steps == 0:
                 # success rate should be zero for tasks we did not sample.
                 dro_task_attempts[dro_task_attempts == 0] = 1
                 dro_mean_success_per_task = dro_task_success_any_step / dro_task_attempts
                 dro_mean_return_per_task = dro_task_return_sum / dro_task_attempts
+                if dro_mean_return_per_task_prev is None:
+                    dro_mean_return_per_task_prev = np.zeros(self.num_tasks)
 
-                dro_task_frac = np.zeros(self.num_tasks)
-                dro_total_count = sum(dro_task_counts)
+                if config.task_sampling_algo == 'uniform':
+                    gaps = np.zeros(self.num_tasks)
 
-                # print(f"{'Task Name':<30} {'Success Rate':>12} {'Task Weight':>12} {'Frac Sampled':>12} ")
-                # print("-" * 60)
-                # for i in range(self.num_tasks):
-                #     frac = (dro_task_counts[i] / dro_total_count) if dro_total_count > 0 else 0
-                #     print(f"{task_names[i]:<30} {dro_mean_success_per_task[i]:>10.3f} {dist[i]:>10.3f} {frac:>10.3f}")
-                #     dro_task_frac[i] = frac
-                # print("=" * 60)
+                elif config.task_sampling_algo == 'dro':
+                    # gaps = success_ref - dro_mean_success_per_task
+                    gaps = (return_ref - dro_mean_return_per_task) / return_ref
+                elif config.task_sampling_algo == 'learning_progress':
+                    slopes = np.abs(dro_mean_return_per_task - dro_mean_return_per_task_prev)
+                    slopes /= (slopes.max() + 0.01)
+                    gaps = slopes
+                elif config.task_sampling_algo == 'learning_potential':
+                    if task_abs_adv is None:
+                        gaps = np.zeros(self.num_tasks)
+                    else:
+                        gaps = task_abs_adv #/ np.max(task_abs_adv)
 
-                # for task_i in range(self.num_tasks):
-                #     success_ref[task_i] = np.clip(max(success_ref[task_i], dro_mean_success_per_task[task_i] + 0.1), 0, 1)
-                # success_ref = np.ones(self.num_tasks)
-                #
-                # success_ref_list = [
-                #     ("assembly-v3", 0.12),
-                #     ("basketball-v3", 0.82),
-                #     ("bin-picking-v3", 0.78),
-                #     ("box-close-v3", 1),
-                #     ("button-press-topdown-v3", 1),
-                #     ("button-press-topdown-wall-v3", 1),
-                #     ("button-press-v3", 1),
-                #     ("button-press-wall-v3", 1),
-                #     ("coffee-button-v3", 1),
-                #     ("coffee-pull-v3", 1),
-                #     ("coffee-push-v3", 1),
-                #     ("dial-turn-v3", 1),
-                #     ("disassemble-v3", 0.08),
-                #     ("door-close-v3", 1),
-                #     ("door-lock-v3", 1),
-                #     ("door-open-v3", 1),
-                #     ("door-unlock-v3", 1),
-                #     ("hand-insert-v3", 1),
-                #     ("drawer-close-v3", 1),
-                #     ("drawer-open-v3", 1),
-                #     ("faucet-open-v3", 1),
-                #     ("faucet-close-v3", 1),
-                #     ("hammer-v3", 1),
-                #     ("handle-press-side-v3", 1),
-                #     ("handle-press-v3", 1),
-                #     ("handle-pull-side-v3", 1),
-                #     ("handle-pull-v3", 1),
-                #     ("lever-pull-v3", 1),
-                #     ("pick-place-wall-v3", 0.96),
-                #     ("pick-out-of-hole-v3", 1),
-                #     ("pick-place-v3", 1),
-                #     ("plate-slide-v3", 1),
-                #     ("plate-slide-side-v3", 1),
-                #     ("plate-slide-back-v3", 1),
-                #     ("plate-slide-back-side-v3", 1),
-                #     ("peg-insert-side-v3", 1),
-                #     ("peg-unplug-side-v3", 1),
-                #     ("soccer-v3", 0.88),
-                #     ("stick-push-v3", 1),
-                #     ("stick-pull-v3", 0.66),
-                #     ("push-v3", 1),
-                #     ("push-wall-v3", 1),
-                #     ("push-back-v3", 1),
-                #     ("reach-v3", 1),
-                #     ("reach-wall-v3", 1),
-                #     ("shelf-place-v3", 1),
-                #     ("sweep-into-v3", 1),
-                #     ("sweep-v3", 1),
-                #     ("window-open-v3", 1),
-                #     ("window-close-v3", 1),
-                # ]
-                #
-                # # Extract names and numeric values
-                # task_names = np.array([x[0] for x in success_ref_list])
-                # success_ref = np.array([x[1] for x in success_ref_list], dtype=float)
+                    print(gaps)
 
+                if config.task_sampling_algo == 'smt':
+                    dist = smt_scheduler.update(
+                        steps_used=dro_task_steps,
+                        eval_metrics=dro_mean_return_per_task,
+                    )
+                    self.set_task_distributions(envs, dist)
+                else:
+                    dist = self.update_task_weights(q=dist, gap=gaps, eta=config.dro_eta, step_size=config.dro_learning_rate, dro_eps=config.dro_eps)
 
+                    if config.task_sampling_algo == 'learning_progress':
+                        for task_id in range(self.num_tasks):
+                            if len(success_history[task_id]) == 50 and np.mean(success_history[task_id]) > 0.9:
+                                dist[task_id] = 0
 
-                # dist = self.exponentiated_gradient_ascent_step(
-                #     w=dist,
-                #     returns=dro_mean_success_per_task,
-                #     returns_ref=success_ref,
-                #     learning_rate=dro_learning_rate,
-                #     eps=dro_eps,
-                #     min_prob=dro_min_prob if dro_min_prob else 1/self.num_tasks * 1/10,
-                # )
-
-                gaps = success_ref - dro_mean_success_per_task
-                dist = self.update_task_weights(q=dist, gap=gaps, eta=config.dro_eta, step_size=config.dro_learning_rate)
+                        if np.all(dist == 0):
+                            dist = np.ones(self.num_tasks)/self.num_tasks
+                        else:
+                            dist = self.kl_project_with_floor(dist, config.dro_eps)
 
                 # dist[:] = 0
                 # dist[12] = 1
@@ -1182,18 +1362,26 @@ class OnPolicyAlgorithm(
                 if track:
                     dro_metrics = {}
                     for i, task_name in enumerate(task_names):
-                        dro_metrics[f'dro/{task_name}_success_rate'] = dro_mean_success_per_task[i]
+                        dro_metrics[f"dro_weight/{task_name}"] = dist[i]
+                        dro_metrics[f"dro_ref/{task_name}"] = return_ref[i]
+
+                        # if dro_task_attempts[i] > 0:
+                        #     dro_metrics[f'dro/{task_name}_success_rate'] = dro_mean_success_per_task[i]
+                        #     dro_metrics[f"dro/{task_name}_return"] = dro_mean_return_per_task[i]
+                        # else:
+                        #     dro_metrics[f'dro/{task_name}_success_rate'] = float("nan")
+                        #     dro_metrics[f"dro/{task_name}_return"] = float("nan")
                         # dro_metrics[f"dro/{task_name}_frac"] = dro_task_frac[i]
-                        dro_metrics[f"dro/{task_name}_weight"] = dist[i]
-                        dro_metrics[f"dro/{task_name}_return"] = dro_mean_return_per_task[i]
                         # dro_metrics[f"dro/{task_name}_ref"] = success_ref[i]
 
-                        log(dro_metrics, step=total_steps)
+                    log(dro_metrics, step=total_steps)
 
                 dro_task_return_sum[:] = 0
                 dro_task_success_any_step[:] = 0
                 dro_task_attempts[:] = 0
                 dro_task_counts[:] = 0
+                dro_task_steps[:] = 0
+                dro_mean_return_per_task_prev[:] = dro_mean_return_per_task
 
             # if reset_optimizer_steps > 0 and global_step % reset_optimizer_steps == 0 and global_step > 0:
             #     print('BEFORE RESET')
@@ -1224,6 +1412,8 @@ class OnPolicyAlgorithm(
                 rollout_buffer.reset()
                 update_count += 1
 
+                task_abs_adv = logs.pop("metrics/task_abs_adv", np.zeros(self.num_tasks))
+
                 if track:
                     log(logs, step=total_steps)
 
@@ -1236,11 +1426,19 @@ class OnPolicyAlgorithm(
                 print(f'{mean_success_per_task=}')
                 print(f'{task_attempts=}')
 
+                # for i in range(self.num_tasks):
+                #     print(success_history[i])
+                #     print(f"{task_names[i]}: {len(success_history[i])} steps, {np.mean(success_history[i])} success rate")
+
                 if track:
                     train_metrics = {}
                     for i, task_name in enumerate(task_names):
-                        train_metrics[f'train/{task_name}_success_rate'] = mean_success_per_task[i]
-                        train_metrics[f'train/{task_name}_return'] = mean_return_per_task[i]
+                        if task_attempts[i] > 0:
+                            train_metrics[f'train_success_rate/{task_name}'] = mean_success_per_task[i]
+                            train_metrics[f'train_return/{task_name}'] = mean_return_per_task[i]
+                        else:
+                            train_metrics[f'train_success_rate/{task_name}'] = float("nan")
+                            train_metrics[f'train_return/{task_name}'] = float("nan")
 
                     log(train_metrics, step=total_steps)
 
@@ -1307,21 +1505,25 @@ class OnPolicyAlgorithm(
                         _, _ = envs.reset()
                         episode_started = np.ones((envs.num_envs,))
                     else:
-                        mean_success_rate, mean_returns, mean_success_per_task = (
+                        mean_success_rate, mean_returns, mean_success_per_task, mean_return_per_task = (
                             env_config.evaluate(eval_env, self)
                         )
                         eval_metrics = {
                             "charts/mean_success_rate": float(mean_success_rate),
-                            "charts/mean_evaluation_return": float(mean_returns),
+                            "charts/mean_return": float(mean_returns),
                         } | {
                             f"charts/{task_name}_success_rate": float(success_rate)
                             for task_name, success_rate in mean_success_per_task.items()
+                        } | {
+                            f"charts/{task_name}_return": float(mean_return)
+                            for task_name, mean_return in mean_return_per_task.items()
                         }
                         print(
                             f"total_steps={total_steps}, mean evaluation success rate: {mean_success_rate:.4f}"
                             + f" return: {mean_returns:.4f}"
                         )
-                        print(mean_success_per_task)
+                        # print(mean_success_per_task)
+                        # print(mean_return_per_task)
 
                         if track:
                             log(eval_metrics, step=total_steps)

@@ -1,5 +1,6 @@
 from collections import defaultdict
 from dataclasses import dataclass
+from functools import partial
 from typing import Literal, Self, override
 
 import chex
@@ -28,7 +29,7 @@ from metaworld_algorithms.monitoring.utils import (
     pytree_histogram,
 )
 from metaworld_algorithms.rl.algorithms.utils import to_minibatch_iterator
-from metaworld_algorithms.rl.networks import ContinuousActionPolicy, ValueFunction
+from metaworld_algorithms.rl.networks import ContinuousActionPolicy, ValueFunction, Ensemble
 from metaworld_algorithms.types import (
     Action,
     AuxPolicyOutputs,
@@ -123,12 +124,11 @@ class PPOConfig(AlgorithmConfig):
     num_gradient_steps: int = 32
     num_epochs: int = 16
     target_kl: float | None = None
-    dro_upd_num_steps: int | None = None
-
 
 class PPO(OnPolicyAlgorithm[PPOConfig]):
     policy: TrainState
     value_function: TrainState | None
+    value_function_ensemble: TrainState | None
     key: PRNGKeyArray
     gamma: float = struct.field(pytree_node=False)
     clip_eps: float = struct.field(pytree_node=False)
@@ -142,7 +142,7 @@ class PPO(OnPolicyAlgorithm[PPOConfig]):
     num_gradient_steps: int = struct.field(pytree_node=False)
     num_epochs: int = struct.field(pytree_node=False)
     target_kl: float | None = struct.field(pytree_node=False)
-    dro_upd_num_steps: int | None = struct.field(pytree_node=False)
+    # task_abs_adv: npt.NDArray | None = struct.field(pytree_node=False, default=None)
 
     @override
     @staticmethod
@@ -155,7 +155,7 @@ class PPO(OnPolicyAlgorithm[PPOConfig]):
         )
 
         master_key = jax.random.PRNGKey(seed)
-        algorithm_key, actor_init_key, vf_init_key = jax.random.split(master_key, 3)
+        algorithm_key, actor_init_key, vf_init_key, value_function_ensemble_init_key = jax.random.split(master_key, 4)
         dummy_obs = jnp.array(
             [env_config.observation_space.sample() for _ in range(config.num_tasks)]
         )
@@ -180,11 +180,25 @@ class PPO(OnPolicyAlgorithm[PPOConfig]):
                 params=vf_net.init(vf_init_key, dummy_obs),
                 tx=config.vf_config.network_config.optimizer.spawn(),
             )
+            vds = False
+            value_function_ensemble = None
+            if vds:
+                # value_function_ensemble_init_key = jax.random.split(master_key, 2)
+
+                value_function_cls = partial(ValueFunction, config=config.vf_config)
+                # just 2 vf because we can use the main one as well, so 3 total.
+                value_function_ensemble_net = Ensemble(value_function_cls, num=2)
+                value_function_ensemble = TrainState.create(
+                    apply_fn=value_function_ensemble_net.apply,
+                    params=value_function_ensemble_net.init(value_function_ensemble_init_key, dummy_obs),
+                    tx=config.vf_config.network_config.optimizer.spawn(),
+                )
 
         return PPO(
             num_tasks=config.num_tasks,
             policy=policy,
             value_function=value_function,
+            value_function_ensemble=value_function_ensemble,
             key=algorithm_key,
             gamma=config.gamma,
             clip_eps=config.clip_eps,
@@ -197,7 +211,6 @@ class PPO(OnPolicyAlgorithm[PPOConfig]):
             num_gradient_steps=config.num_gradient_steps,
             num_epochs=config.num_epochs,
             target_kl=config.target_kl,
-            dro_upd_num_steps=config.dro_upd_num_steps,
         )
 
     @override
@@ -260,13 +273,13 @@ class PPO(OnPolicyAlgorithm[PPOConfig]):
         # x: (N,), idx: (N,)
         sums = jax.ops.segment_sum(x, idx, num_segments)
         counts = jax.ops.segment_sum(jnp.ones_like(x), idx, num_segments)
-        return sums / (counts + 1e-8)
+        return sums / (counts + 1e-3)
 
     def segment_std(self, x, idx, num_segments):
         means = self.segment_mean(x, idx, num_segments)
         sq_means = self.segment_mean(x ** 2, idx, num_segments)
         var = sq_means - means ** 2
-        return jnp.sqrt(jnp.maximum(var, 0.0)) + 1e-8
+        return jnp.sqrt(jnp.maximum(var, 0.0)) + 1e-3
 
     def update_policy(self, data: Rollout) -> tuple[Self, LogDict]:
         assert data.advantages is not None
@@ -341,23 +354,25 @@ class PPO(OnPolicyAlgorithm[PPOConfig]):
         (_, logs), policy_grads = jax.value_and_grad(policy_loss, has_aux=True)(
             self.policy.params
         )
-        policy_grads_flat, _ = jax.flatten_util.ravel_pytree(policy_grads)
-        grads_hist_dict = prefix_dict(
-            "nn/policy_grads", pytree_histogram(policy_grads["params"])
-        )
+        # policy_grads_flat, _ = jax.flatten_util.ravel_pytree(policy_grads)
+        # grads_hist_dict = prefix_dict(
+        #     "nn/policy_grads", pytree_histogram(policy_grads["params"])
+        # )
 
         policy = self.policy.apply_gradients(grads=policy_grads)
-        policy_params_flat, _ = jax.flatten_util.ravel_pytree(policy.params["params"])
-        param_hist_dict = prefix_dict(
-            "nn/policy_params", pytree_histogram(policy.params["params"])
-        )
+        # policy_params_flat, _ = jax.flatten_util.ravel_pytree(policy.params["params"])
+        # param_hist_dict = prefix_dict(
+        #     "nn/policy_params", pytree_histogram(policy.params["params"])
+        # )
 
-        return self.replace(policy=policy), logs | {
-            "nn/policy_grad_norm": jnp.linalg.norm(policy_grads_flat),
-            "nn/policy_param_norm": jnp.linalg.norm(policy_params_flat),
-            **grads_hist_dict,
-            **param_hist_dict,
-        }
+        return self.replace(policy=policy), logs
+
+        # return self.replace(policy=policy), logs | {
+        #     "nn/policy_grad_norm": jnp.linalg.norm(policy_grads_flat),
+        #     "nn/policy_param_norm": jnp.linalg.norm(policy_params_flat),
+        #     **grads_hist_dict,
+        #     **param_hist_dict,
+        # }
 
     def update_value_function(self, data: Rollout) -> tuple[Self, LogDict]:
         assert self.value_function is not None
@@ -387,23 +402,90 @@ class PPO(OnPolicyAlgorithm[PPOConfig]):
         (_, logs), vf_grads = jax.value_and_grad(value_function_loss, has_aux=True)(
             self.value_function.params
         )
-        vf_grads_flat, _ = jax.flatten_util.ravel_pytree(vf_grads)
-        grads_hist_dict = prefix_dict(
-            "nn/vf_grads", pytree_histogram(vf_grads["params"])
-        )
+        # vf_grads_flat, _ = jax.flatten_util.ravel_pytree(vf_grads)
+        # grads_hist_dict = prefix_dict(
+        #     "nn/vf_grads", pytree_histogram(vf_grads["params"])
+        # )
 
         value_function = self.value_function.apply_gradients(grads=vf_grads)
-        vf_params_flat, _ = jax.flatten_util.ravel_pytree(value_function.params)
-        param_hist_dict = prefix_dict(
-            "nn/vf_params", pytree_histogram(value_function.params["params"])
-        )
+        # vf_params_flat, _ = jax.flatten_util.ravel_pytree(value_function.params)
+        # param_hist_dict = prefix_dict(
+        #     "nn/vf_params", pytree_histogram(value_function.params["params"])
+        # )
 
-        return self.replace(value_function=value_function), logs | {
-            "nn/vf_grad_norm": jnp.linalg.norm(vf_grads_flat),
-            "nn/vf_param_norm": jnp.linalg.norm(vf_params_flat),
-            **grads_hist_dict,
-            **param_hist_dict,
-        }
+        return self.replace(value_function=value_function), logs
+
+        # return self.replace(value_function=value_function), logs | {
+        #     "nn/vf_grad_norm": jnp.linalg.norm(vf_grads_flat),
+        #     "nn/vf_param_norm": jnp.linalg.norm(vf_params_flat),
+        #     **grads_hist_dict,
+        #     **param_hist_dict,
+        # }
+
+    def update_value_function_ensemble(self, data: Rollout) -> tuple[Self, LogDict]:
+        assert self.value_function_ensemble is not None
+        assert data.returns is not None and data.values is not None
+
+        def value_function_ensemble_loss(
+            params: FrozenDict,
+        ) -> tuple[Float[Array, ""], LogDict]:
+            # new_values_ens: (K, B, 1) if K = ensemble_size
+            new_values_ens: Float[Array, "... 1"]
+            new_values_ens = self.value_function_ensemble.apply_fn(
+                params, data.observations
+            )
+
+            # Broadcast returns / old values to ensemble shape.
+            # data.returns: (B, 1) → (K, B, 1)
+            returns = data.returns
+            values_old = data.values
+            # Broadcasting happens automatically in JAX ops below.
+
+            if self.clip_vf_loss:
+                vf_loss_unclipped = (new_values_ens - returns) ** 2
+                v_clipped = values_old + jnp.clip(
+                    new_values_ens - values_old, -self.clip_eps, self.clip_eps
+                )
+                vf_loss_clipped = (v_clipped - returns) ** 2
+                vf_loss = 0.5 * jnp.maximum(
+                    vf_loss_unclipped, vf_loss_clipped
+                ).mean()
+            else:
+                vf_loss = 0.5 * ((new_values_ens - returns) ** 2).mean()
+
+            return self.vf_coefficient * vf_loss, {
+                "losses/value_function_ensemble": vf_loss,
+                "losses/values_ensemble": new_values_ens.mean(),
+            }
+
+        (_, logs), vf_grads = jax.value_and_grad(
+            value_function_ensemble_loss, has_aux=True
+        )(self.value_function_ensemble.params)
+
+        # vf_grads_flat, _ = jax.flatten_util.ravel_pytree(vf_grads)
+        # grads_hist_dict = prefix_dict(
+        #     "nn/vf_ens_grads", pytree_histogram(vf_grads["params"])
+        # )
+
+        value_function_ensemble = self.value_function_ensemble.apply_gradients(
+            grads=vf_grads
+        )
+        # vf_params_flat, _ = jax.flatten_util.ravel_pytree(
+        #     value_function_ensemble.params
+        # )
+        # param_hist_dict = prefix_dict(
+        #     "nn/vf_ens_params",
+        #     pytree_histogram(value_function_ensemble.params["params"]),
+        # )
+
+        return self.replace(value_function_ensemble=value_function_ensemble), logs
+
+        # return self.replace(value_function_ensemble=value_function_ensemble), logs | {
+        #     "nn/vf_ens_grad_norm": jnp.linalg.norm(vf_grads_flat),
+        #     "nn/vf_ens_param_norm": jnp.linalg.norm(vf_params_flat),
+        #     **grads_hist_dict,
+        #     **param_hist_dict,
+        # }
 
     @jax.jit
     def _get_activations(
@@ -426,11 +508,57 @@ class PPO(OnPolicyAlgorithm[PPOConfig]):
 
     @jax.jit
     def _update_inner(self, data: Rollout) -> tuple[Self, LogDict]:
+        #
+        # task_ids = data.observations[..., -self.num_tasks :]
+        #
+        # if self.use_task_weights:
+        #     task_weights = extract_task_weights(self.alpha.params, task_ids)
+        # else:
+        #     task_weights = None
+        #
+        # actor_data = critic_data = data
+        # actor_alpha_vals = critic_alpha_vals = alpha_vals
+        # actor_task_weights = critic_task_weights = task_weights
+        # alpha_val_indices = None
+        #
+        # if self.split_critic_losses or self.split_actor_losses:
+        #     split_data, _ = self.split_data_by_tasks(data, task_ids)
+        #     split_alpha_vals, alpha_val_indices = self.split_data_by_tasks(
+        #         alpha_vals, task_ids
+        #     )
+        #     split_task_weights, _ = (
+        #         self.split_data_by_tasks(task_weights, task_ids)
+        #         if task_weights is not None
+        #         else (None, None)
+        #     )
+        #
+        #     if self.split_critic_losses:
+        #         critic_data = split_data
+        #         critic_alpha_vals = split_alpha_vals
+        #         critic_task_weights = split_task_weights
+        #
+        #     if self.split_actor_losses:
+        #         actor_data = split_data
+        #         actor_alpha_vals = split_alpha_vals
+        #         actor_task_weights = split_task_weights
+        #
+        # self, critic_logs = self.update_critic(
+        #     critic_data, critic_alpha_vals, critic_task_weights
+        # )
+        # self, log_probs, actor_logs = self.update_actor(
+        #     actor_data, actor_alpha_vals, actor_task_weights
+        # )
+
+
         self, policy_logs = self.update_policy(data)
 
         vf_logs = {}
         if self.baseline_type == "mlp":
             self, vf_logs = self.update_value_function(data)
+
+            # if self.value_function_ensemble is not None:
+            #     self, vf_ens_logs = self.update_value_function_ensemble(data)
+            #     vf_logs = vf_logs | vf_ens_logs
 
         return self, policy_logs | vf_logs
 
@@ -453,24 +581,37 @@ class PPO(OnPolicyAlgorithm[PPOConfig]):
             dones = np.ones(data.rewards.shape[1:], dtype=data.rewards.dtype)
         data = compute_gae(data, self.gamma, self.gae_lambda, last_values, dones)
 
+        # Compute per-task mean absolute normalized advantage on full batch
+        task_ids = np.argmax(data.observations.reshape(-1, data.observations.shape[-1])[:, -self.num_tasks:], axis=-1)
+        adv = data.advantages.reshape(-1)
+        means = np.bincount(task_ids, weights=adv, minlength=self.num_tasks) / np.bincount(task_ids,
+                                                                                           minlength=self.num_tasks).clip(
+            min=1)
+        stds = np.sqrt(
+            np.bincount(task_ids, weights=(adv - means[task_ids]) ** 2, minlength=self.num_tasks) / np.bincount(
+                task_ids, minlength=self.num_tasks).clip(min=1))
+        adv_normalized = (adv - means[task_ids]) / (stds[task_ids] + 1e-8)
+        task_abs_adv = np.bincount(task_ids, weights=np.abs(adv_normalized), minlength=self.num_tasks) / np.bincount(
+            task_ids, minlength=self.num_tasks).clip(min=1)
+
         assert data.advantages is not None and data.returns is not None
         assert data.values is not None and data.stds is not None
         assert data.means is not None and data.log_probs is not None
-        diagnostic_logs = prefix_dict(
-            "data",
-            {
-                **get_logs("advantages", data.advantages),
-                **get_logs("returns", data.returns),
-                **get_logs("values", data.values),
-                **get_logs("rewards", data.rewards),
-                **get_logs(
-                    "num_episodes", data.dones.sum(axis=1), hist=False, std=False
-                ),
-                "action_std": Histogram(data.stds.reshape(-1)),
-                "action_mean": Histogram(data.means.reshape(-1)),
-                "approx_entropy": np.mean(-data.log_probs),
-            },
-        )
+        # diagnostic_logs = prefix_dict(
+        #     "data",
+        #     {
+        #         **get_logs("advantages", data.advantages),
+        #         **get_logs("returns", data.returns),
+        #         **get_logs("values", data.values),
+        #         **get_logs("rewards", data.rewards),
+        #         **get_logs(
+        #             "num_episodes", data.dones.sum(axis=1), hist=False, std=False
+        #         ),
+        #         "action_std": Histogram(data.stds.reshape(-1)),
+        #         "action_mean": Histogram(data.means.reshape(-1)),
+        #         "approx_entropy": np.mean(-data.log_probs),
+        #     },
+        # )
 
         key, minibatch_iterator_key = jax.random.split(self.key)
         self = self.replace(key=key)
@@ -488,7 +629,7 @@ class PPO(OnPolicyAlgorithm[PPOConfig]):
                 minibatch_rollout = next(minibatch_iterator)
                 self, logs = self._update_inner(minibatch_rollout)
                 for k, v in logs.items():
-                    update_logs[k].append(v)
+                    update_logs[k].append(float(jax.device_get(v)))
 
                 if epoch == 0 and step == 0:  # Initial KL and Loss
                     update_logs["metrics/kl_before"] = [logs["losses/approx_kl"]]
@@ -525,9 +666,10 @@ class PPO(OnPolicyAlgorithm[PPOConfig]):
                 final_logs[k] = v[-1]
 
         # log activations
-        policy_acts, vf_acts = self._get_activations(next(minibatch_iterator))
-        final_logs.update(prefix_dict("nn/activations", pytree_histogram(policy_acts)))
-        if vf_acts is not None:
-            final_logs.update(pytree_histogram(vf_acts))
+        # policy_acts, vf_acts = self._get_activations(next(minibatch_iterator))
+        # final_logs.update(prefix_dict("nn/activations", pytree_histogram(policy_acts)))
+        # if vf_acts is not None:
+        #     final_logs.update(pytree_histogram(vf_acts))
 
-        return self, diagnostic_logs | final_logs
+        # return self, diagnostic_logs | final_logs
+        return self, final_logs | {"metrics/task_abs_adv": task_abs_adv}
