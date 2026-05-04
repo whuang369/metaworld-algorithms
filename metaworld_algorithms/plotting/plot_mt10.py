@@ -25,31 +25,39 @@ if __name__ == "__main__":
     i = 1
 
     groups = [
-        'dro/rs_10000/lr_0.0005/ep_16/eta_3/lr_0.5/e_0.005',
-        'dro/rs_10000/lr_0.0005/ep_16/eta_3/lr_0/e_0.005',
+        'dro/rs_10000/lr_0.0005/e_16/gs_32/eta_8/lr_0.5/eps_0.025',
+        'lp/rs_10000/lr_0.0005/e_16/gs_32/eta_8/lr_0.5/eps_0.025',
+        'dro/rs_10000/lr_0.0005/e_16/gs_32/eta_8/lr_0/eps_0.025',
+        'smt'
     ]
+    metric = 'return'
+    # metric = 'success_rate'
+    y_name = f"charts_mean_{metric}"
 
     for group in groups:
         key = group
-        results_dir = f"results_mt50/{group}"
+        results_dir = f"results_mt10/{group}"
         if not os.path.exists(results_dir):
             print (f'Group {group} does not exist')
             continue
 
         # Now we can use dot notation which is much cleaner
-        x, y = get_data(results_dir, x_name='step', y_name='charts_mean_return', truncate=50)
+        x, y = get_data(results_dir, x_name='step', y_name=y_name, truncate=50)
         if len(y) > 0:
             # if len(y) < 50: continue
             key = group
 
-            if 'lr_0/' in group:
+            if 'lp' in group:
+                key = 'LP'
+            elif 'lr_0/' in group:
                 key = 'Uniform'
             else:
                 key = 'DRO'
 
             y = y[:, ::1]
             data_dict[key].extend(y)
-            x = np.arange(1, len(y[0])+1)* 10e6 * 1
+            x = (x[0] + 1)*2e6
+            print(y.shape)
 
 
     ax = plt.subplot(n_rows, n_cols, i)
@@ -64,6 +72,12 @@ if __name__ == "__main__":
     for key, value in scores.items():
         print(key, value.shape, scores[key][-1], cis[key][:, -1])
 
+
+    if 'return' in y_name:
+        ylabel = 'Mean Return'
+    else:
+        ylabel = 'Mean Success Rate'
+
     plot_sample_efficiency_curve(
         frames=x,
         point_estimates=scores,
@@ -71,12 +85,13 @@ if __name__ == "__main__":
         ax=ax,
         algorithms=None,
         xlabel='Timestep',
-        ylabel=f'Return',
-        # title=f'MT50',
+        ylabel=ylabel,
+        # title=f'MT10',
         labelsize='large',
         ticklabelsize='large',
-        marker=''
+        marker='',
     )
+    plt.title('MT10')
     # Use scientific notation for x-axis
     plt.ticklabel_format(style='sci', axis='x', scilimits=(0, 0))
 
@@ -95,11 +110,11 @@ if __name__ == "__main__":
     # Fetch and plot the legend from one of the subplots.
     ax = fig.axes[0]
     handles, labels = ax.get_legend_handles_labels()
-    fig.legend(handles, labels, loc='upper center', fontsize='large', ncols=2)
+    fig.legend(handles, labels, loc='upper center', fontsize='large', ncols=3)
 
     save_dir = f'figures'
-    save_name = f'mt10_average.png'
+    save_name = f'mt10_{metric}.png'
     os.makedirs(save_dir, exist_ok=True)
-    plt.savefig(f'{save_dir}/{save_name}')
+    plt.savefig(f'{save_dir}/{save_name}', dpi=200)
 
     plt.show()

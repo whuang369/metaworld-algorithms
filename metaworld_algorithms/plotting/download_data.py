@@ -121,39 +121,61 @@ def main():
     print(f"Saving individual run files under: {output_dir}")
 
     # safe_metric = sanitize_key(args.metric)
-
     num_saved = 0
     for idx, run in enumerate(runs):
         print(f"[{idx+1}/{len(runs)}] Run id={run.id}, name={run.name} ...", flush=True)
-        result = load_run_history(run, args.metric, max_rows=args.max_rows)
-        if result is None:
-            print(f"  -> metric '{args.metric}' not found or empty, skipping.")
+
+        # Load full history once
+        samples = args.max_rows if args.max_rows is not None else 100000
+        hist = run.history(samples=samples)
+        if isinstance(hist, list):
+            hist = pd.DataFrame(hist)
+
+        # Find metrics that start with "charts/"
+        chart_metrics = [c for c in hist.columns]
+        try:
+            chart_metrics.remove('charts/mean_episodic_return')
+            chart_metrics.remove('charts/SPS')
+        except ValueError:
+            pass
+        print("Found chart metrics:", chart_metrics)
+
+        if len(chart_metrics) == 0:
+            print("  -> No 'charts/*' metrics found, skipping this run.")
             continue
 
-        step, values = result
+        # Extract step column once
+        step_key = next((k for k in ["Step"] if k in hist.columns), None)
+        if step_key is not None:
+            step = hist[step_key].dropna().to_numpy(float)
+        else:
+            step = np.arange(len(hist), dtype=float)
 
-        # File name: run_0.npz, run_1.npz, ...
+        # Dictionary to save into .npz
+        save_dict = {"step": step}
+
+        # Fetch each charts/* metric
+        for metric in chart_metrics:
+            df = hist[[metric]].dropna()
+            if df.empty:
+                print(f"  -> Metric '{metric}' is empty, skipping.")
+                continue
+
+            values = df[metric].to_numpy(float)
+            safe_key = sanitize_key(metric)
+            save_dict[safe_key] = values
+            print(f"  -> Added metric: {metric} ({safe_key}), {len(values)} points")
+
+        # Save run file
         file_name = f"run_{num_saved}.npz"
         file_path = os.path.join(output_dir, file_name)
+        np.savez(file_path, **save_dict)
+        print(f"  -> Saved {file_path}")
 
-        print(file_path)
-
-        np.savez(
-            file_path,
-            step=step,
-            # **{safe_metric: values},
-            # run_id=run.id,
-            # run_name=str(run.name),
-            # entity=args.entity,
-            # project=args.project,
-            # group=args.group,
-            # metric=args.metric,
-            values=values,
-        )
-
-        print(f"  -> saved to {file_path}")
         num_saved += 1
 
+    if num_saved == 0:
+        raise RuntimeError("No runs contained any non-empty charts/* metrics.")
     if num_saved == 0:
         raise RuntimeError(
             f"No runs in group '{args.group}' contained non-empty metric '{args.metric}'"
