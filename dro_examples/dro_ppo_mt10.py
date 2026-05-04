@@ -8,9 +8,9 @@ from metaworld_algorithms.config.networks import (
     ContinuousActionPolicyConfig, ValueFunctionConfig,
 )
 from metaworld_algorithms.config.nn import (
-    VanillaNetworkConfig, MultiHeadConfig, MOOREConfig, PaCoConfig
+    VanillaNetworkConfig, MultiHeadConfig, MOOREConfig, PaCoConfig, SoftModulesConfig
 )
-from metaworld_algorithms.config.optim import OptimizerConfig
+from metaworld_algorithms.config.optim import OptimizerConfig, PCGradConfig
 from metaworld_algorithms.config.rl import OnPolicyTrainingConfig
 from metaworld_algorithms.envs import MetaworldConfig
 from metaworld_algorithms.rl.algorithms import PPOConfig
@@ -21,30 +21,41 @@ from metaworld_algorithms.run import Run
 #  Shared helpers
 # ---------------------------------------------------------------------------
 
-def build_network_config(net_type: str, num_tasks: int):
+def build_network_config(net_type: str, num_tasks: int, learning_rate: float, optimizer: str):
     """Return appropriate network_config based on network type."""
+    if optimizer == 'vanilla':
+        optimizer_config = OptimizerConfig(lr=learning_rate, max_grad_norm=1.0)
+    elif optimizer == 'pcgrad':
+        optimizer_config = PCGradConfig(lr=learning_rate, num_tasks=num_tasks, max_grad_norm=1.0)
+
     if net_type == "single_head":
         return VanillaNetworkConfig(
-            optimizer=OptimizerConfig(lr=1e-3, max_grad_norm=1.0)
+            optimizer=optimizer_config
         )
 
     elif net_type == "multi_head":
         return MultiHeadConfig(
             num_tasks=num_tasks,
-            optimizer=OptimizerConfig(lr=1e-3, max_grad_norm=1.0),
+            optimizer=optimizer_config
         )
 
     elif net_type == "moore":
         return MOOREConfig(
             num_tasks=num_tasks,
-            optimizer=OptimizerConfig(lr=1e-3, max_grad_norm=1.0),
+            optimizer=optimizer_config
+        )
+
+    elif net_type == "soft_modules":
+        return SoftModulesConfig(
+            num_tasks=num_tasks,
+            optimizer=optimizer_config
         )
 
     elif net_type == "paco":
         return PaCoConfig(
             num_tasks=num_tasks,
-            num_parameter_sets=20,
-            optimizer=OptimizerConfig(lr=1e-3, max_grad_norm=1.0),
+            num_parameter_sets=5,
+            optimizer=optimizer_config,
         )
 
     else:
@@ -55,8 +66,8 @@ def build_network_config(net_type: str, num_tasks: int):
 #  Actor config
 # ---------------------------------------------------------------------------
 
-def get_actor_config(actor_type: str, num_tasks: int) -> ContinuousActionPolicyConfig:
-    net = build_network_config(actor_type, num_tasks)
+def get_actor_config(actor_type: str, num_tasks: int, learning_rate: float, optimizer) -> ContinuousActionPolicyConfig:
+    net = build_network_config(actor_type, num_tasks, learning_rate, optimizer)
 
     # special handling for MOORE (bounded log_std)
     if actor_type == "moore":
@@ -80,7 +91,9 @@ def get_actor_config(actor_type: str, num_tasks: int) -> ContinuousActionPolicyC
 def get_value_function_config(
     value_type: str,
     baseline_type: str,
-    num_tasks: int
+    num_tasks: int,
+    learning_rate: float,
+    optimizer: str
 ) -> ValueFunctionConfig | None:
     """
     baseline_type ∈ {"linear", "mlp"}
@@ -108,7 +121,7 @@ def get_value_function_config(
         )
 
     # ----------- build network -----------
-    net = build_network_config(value_type, num_tasks)
+    net = build_network_config(value_type, num_tasks, learning_rate, optimizer)
     return ValueFunctionConfig(network_config=net)
 
 
@@ -133,7 +146,7 @@ class Args:
     total_steps: int = int(10e7)
     evaluation_frequency: int = 2_000_000 // 500
 
-    learning_rate: float = 3e-4
+    learning_rate: float = 5e-4
     num_epochs: int = 8
     num_gradient_steps: int = 32
     rollout_steps: int = 10_000
@@ -141,16 +154,19 @@ class Args:
     normalize_advantages: int = 1
     reset_optimizer_steps: int = -1
 
-    actor_type: Literal["single_head", "multi_head", "moore", "paco"] = "multi_head"
-    value_type: Literal["linear", "single_head", "multi_head", "mlp", "moore"] = "multi_head"
+    actor_type: str = "multi_head"
+    value_type: str = "multi_head"
+    actor_optimizer: Literal["vanilla", "pcgrad"] = "vanilla"
+    value_optimizer: Literal["vanilla", "pcgrad"] = "vanilla"
 
+    task_sampling_algo: str = 'uniform'
     dro_rollout_steps: int = 10_000
     dro_eta: float = 3.0
     dro_learning_rate: float = 0.1
 
     # for DRO over the probability simplex -- not used currently
-    dro_eps: float = 0.05
-    dro_min_prob: float = 0.05
+    dro_eps: float = 0.0
+    dro_min_prob: float = 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -176,16 +192,24 @@ def main() -> None:
         run_name=f"mt10_ppo_dro_{args.seed}",
         seed=args.seed,
         data_dir=args.data_dir,
-        env=MetaworldConfig(env_id=f"DRO-{args.env_id}", terminate_on_success=False),
-        eval_env=MetaworldConfig(env_id=args.env_id, terminate_on_success=True),
+        env=MetaworldConfig(
+            env_id=f"DRO-{args.env_id}",
+            terminate_on_success=False,
+            max_episode_steps=500,
+        ),
+        eval_env=MetaworldConfig(
+            env_id=args.env_id,
+            terminate_on_success=True,
+            max_episode_steps=500,
+        ),
         algorithm=PPOConfig(
             num_tasks=num_tasks,
             gamma=0.99,
-            policy_config=get_actor_config(args.actor_type, num_tasks),
-            vf_config=get_value_function_config(args.value_type, args.baseline_type, num_tasks),
+            policy_config=get_actor_config(args.actor_type, num_tasks, args.learning_rate, optimizer=args.actor_optimizer),
+            vf_config=get_value_function_config(args.value_type, args.baseline_type, num_tasks, args.learning_rate, optimizer=args.value_optimizer),
             baseline_type=args.baseline_type,
-            num_epochs=8,
-            num_gradient_steps=32,
+            num_epochs=args.num_epochs,
+            num_gradient_steps=args.num_gradient_steps,
             gae_lambda=0.97,
             target_kl=0.05,
             entropy_coefficient=args.entropy_coefficient,
@@ -197,7 +221,9 @@ def main() -> None:
             total_steps=args.total_steps,
             rollout_steps=args.rollout_steps,
             evaluation_frequency=args.evaluation_frequency,
+            task_sampling_algo=args.task_sampling_algo,
             dro=True,
+            dro_rollout_steps=args.dro_rollout_steps,
             dro_learning_rate=args.dro_learning_rate,
             dro_eta=args.dro_eta,
             dro_eps=args.dro_eps,
